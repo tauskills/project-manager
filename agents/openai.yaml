@@ -1,0 +1,3 @@
+interface:
+  display_name: "Project Manager Skill"
+  short_description: "Run PRD and release governance checks"
