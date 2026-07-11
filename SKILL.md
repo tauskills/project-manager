@@ -13,6 +13,7 @@ Current scope:
 
 - P1 live module: `prd-qa-checker`
 - P1 live module: `release-readiness-checker`
+- Governance playbook: `project-development-standard`
 - P2 planned modules: `api-contract-guard`, `design-dev-diff-checker`
 
 This repository is the canonical maintenance location for this skill.
@@ -23,6 +24,7 @@ Choose module by input artifact:
 
 - PRD Markdown under `docs/product/`: use `prd-qa-checker`
 - Release record under `docs/release/`: use `release-readiness-checker`
+- Project process / development standard / cross-role artifact planning: use `project-development-standard`
 - API contract alignment review: do not automate here yet; use manual playbook later
 - Design vs implementation diff review: do not automate here yet; use manual playbook later
 
@@ -38,6 +40,13 @@ Use fixed repo paths so inputs and checker outputs are easy to find and can be r
 | PRD QA report | `docs/review/prd-qa/` | `{prd-file-stem}.prd-qa.generated.md` |
 | Release record source | `docs/release/` | one release record per Markdown file |
 | Release readiness report | `docs/review/release-readiness/` | `{release-file-stem}.release-readiness.generated.md` |
+| Product requirement | `docs/01-product/` or `docs/product/` | `{issue-key}-{slug}.md` |
+| UI/design handoff | `docs/02-design/` | `{issue-key}-{slug}.md` |
+| Technical design | `docs/03-development/` | `{issue-key}-{slug}.md` |
+| OpenAPI contract | `docs/03-development/openapi/` | `{issue-key}.yaml` |
+| Database schema | `docs/03-development/schema/` | `{issue-key}.sql` |
+| Test cases/report | `docs/04-testing/` | `{issue-key}-test-cases.md` / `{issue-key}-test-report.md` |
+| Retrospective | `docs/05-retrospective/` | `{issue-key}-retro.md` |
 
 Rules:
 
@@ -125,6 +134,23 @@ Preferred output shape:
 
 Keep conclusions concrete. Do not claim business correctness; judge document readiness only.
 
+## `project-development-standard`
+
+Use when:
+
+- creating or reviewing a project development workflow
+- planning role handoffs across product, UI, architecture, development, QA, release, and retrospective
+- fixing artifact locations and issue comment contracts for future projects
+- deciding whether follow-up changes should be handed to CTO for agent instruction updates
+
+Before acting, read [`references/project-development-standard.md`](references/project-development-standard.md) for:
+
+- end-to-end workflow diagram
+- role, owner, artifact, and path matrix
+- required PRD, UI, technical, development, QA, and release gates
+- issue comment contract
+- CTO handoff rules for other agent changes
+
 ## Guardrails
 
 - Treat this skill as governance automation, not product decision authority.
@@ -137,6 +163,7 @@ Keep conclusions concrete. Do not claim business correctness; judge document rea
 
 - [`references/prd-qa-checker.md`](references/prd-qa-checker.md): live P1 rules
 - [`references/release-readiness-checker.md`](references/release-readiness-checker.md): live P1 rules
+- [`references/project-development-standard.md`](references/project-development-standard.md): cross-role development workflow and artifact standard
 - [`references/prd-example-input.md`](references/prd-example-input.md): sample input
 - [`references/prd-example-report.md`](references/prd-example-report.md): sample output
 - [`scripts/prd_qa_checker.py`](scripts/prd_qa_checker.py): runnable checker
