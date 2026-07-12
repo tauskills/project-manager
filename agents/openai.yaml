@@ -1,3 +1,4 @@
 interface:
   display_name: "Project Manager Skill"
-  short_description: "Run PRD and release governance checks"
+  short_description: "Govern projects from intake through release and closure"
+  default_prompt: "Use $project-manager to govern the current lifecycle stage, review its required artifacts and risks, and return a concrete gate decision with owners and repair actions."

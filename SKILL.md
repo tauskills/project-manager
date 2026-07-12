@@ -1,172 +1,103 @@
 ---
-name: skill-project-manager
-description: Unified governance skill for project managers and AI advisors. Use when work needs stage-gate checks across PRD review, release readiness, project milestone risk, or similar project-governance tasks tied to issue threads and docs folders. Current P1 implementation includes runnable `prd-qa-checker` and `release-readiness-checker` modules plus a shared normalized gate code contract for automation.
+name: project-manager
+description: Govern the complete project lifecycle from intake through design, development, QA, release, and closure using repository-owned artifacts, stage-aware gates, risks, and handoffs. Use when Codex needs to bootstrap feature or release records, review a PRD/UI design/technical design/test case/release record, audit cross-artifact consistency, run a lifecycle-stage gate, define project handoffs, or report milestone and documentation risks tied to issue threads and repository docs.
 ---
 
-# Skill Project Manager
+# Project Manager
 
-## Overview
+Use this skill as the complete project-lifecycle governance entrypoint. Judge artifact readiness and traceability; do not replace product, engineering, QA, or release owners' final decisions.
 
-Use this skill when a project manager, AI advisor, or cross-functional owner needs one entrypoint for governance checks across product, development, QA, and release stages.
+## Select The Lifecycle Stage
 
-Current scope:
+Use one explicit stage for every consolidated gate:
 
-- P1 live module: `prd-qa-checker`
-- P1 live module: `release-readiness-checker`
-- Governance playbook: `project-development-standard`
-- P2 planned modules: `api-contract-guard`, `design-dev-diff-checker`
+| Stage | Required outcome |
+| --- | --- |
+| `intake` | PRD is ready for downstream design |
+| `design` | PRD and local UI handoff are ready |
+| `development` | Technical contract, schema, owners, and test design are ready for implementation |
+| `qa` | Development inputs remain consistent and test execution can proceed |
+| `release` | Test evidence is present; run the event-scoped release gate separately |
+| `closure` | Release is complete and retrospective evidence is archived |
 
-This repository is the canonical maintenance location for this skill.
+## Route The Request
 
-## Module Routing
+Inspect the supplied artifact path and requested outcome, then select the narrowest module:
 
-Choose module by input artifact:
-
-- PRD Markdown under `docs/product/`: use `prd-qa-checker`
-- Release record under `docs/release/`: use `release-readiness-checker`
-- Project process / development standard / cross-role artifact planning: use `project-development-standard`
-- API contract alignment review: do not automate here yet; use manual playbook later
-- Design vs implementation diff review: do not automate here yet; use manual playbook later
-
-If user asks for generic "project management check", inspect supplied doc path first, then choose module from artifact type rather than guessing from prose alone.
-
-## Deterministic Artifact Paths
-
-Use fixed repo paths so inputs and checker outputs are easy to find and can be referenced from issue comments without extra explanation.
-
-| Artifact | Canonical path | Naming rule |
+| Request or artifact | Module | Read before use |
 | --- | --- | --- |
-| PRD source | `docs/product/` | one requirement per Markdown file |
-| PRD QA report | `docs/review/prd-qa/` | `{prd-file-stem}.prd-qa.generated.md` |
-| Release record source | `docs/release/` | one release record per Markdown file |
-| Release readiness report | `docs/review/release-readiness/` | `{release-file-stem}.release-readiness.generated.md` |
-| Product requirement | `docs/01-product/` or `docs/product/` | `{issue-key}-{slug}.md` |
-| UI/design handoff | `docs/02-design/` | `{issue-key}-{slug}.md` |
-| Technical design | `docs/03-development/` | `{issue-key}-{slug}.md` |
-| OpenAPI contract | `docs/03-development/openapi/` | `{issue-key}.yaml` |
-| Database schema | `docs/03-development/schema/` | `{issue-key}.sql` |
-| Test cases/report | `docs/04-testing/` | `{issue-key}-test-cases.md` / `{issue-key}-test-report.md` |
-| Retrospective | `docs/05-retrospective/` | `{issue-key}-retro.md` |
+| Create a new feature documentation skeleton | `feature-doc-bootstrap` | [New Demand Checklist](references/standards/new-demand-init-checklist.md) |
+| Create an event-scoped release record | `release-record-bootstrap` | [Release Template](references/templates/release-record-template.md) |
+| Review `docs/product/*.md` | `prd-qa-checker` | [PRD QA Rules](references/checkers/prd-qa-checker.md) |
+| Review `docs/design/*.md` and local design assets | `ui-design-checker` | [UI Design Rules](references/checkers/ui-design-checker.md) |
+| Review `docs/development/*.md` | `architecture-design-checker` | [Architecture Rules](references/checkers/architecture-design-checker.md) |
+| Validate `docs/development/openapi/openapi.yaml` | `api-contract-checker` | [API Contract Rules](references/checkers/api-contract-checker.md) |
+| Review `docs/testing/*-test-cases.md` | `test-case-checker` | [Test Case Rules](references/checkers/test-case-checker.md) |
+| Review `docs/testing/*-test-report.md` | `test-report-checker` | [Test Report Rules](references/checkers/test-report-checker.md) |
+| Review `docs/retrospective/*-retro.md` | `retrospective-checker` | [Retrospective Rules](references/checkers/retrospective-checker.md) |
+| Review milestones and risks | `project-status-checker` | [Project Status Rules](references/checkers/project-status-checker.md) |
+| Audit one feature across all artifacts | `artifact-consistency-checker` | [Consistency Rules](references/checkers/artifact-consistency-checker.md) |
+| Run the complete feature gate | `feature-governance-check` | [Governance Rules](references/checkers/feature-governance-check.md) |
+| Review `docs/release/*.md` | `release-readiness-checker` | [Release Rules](references/checkers/release-readiness-checker.md) |
+| Define workflow, roles, paths, or handoffs | `project-development-standard` | [Development Standard](references/standards/project-development-standard.md) |
 
-Rules:
+For a generic project-management check, inspect available documents first. Do not guess the module from the request wording alone. For API contract or design-to-implementation diff requests, apply the manual development standard; dedicated automated modules do not exist yet.
 
-- If the workspace does not yet have these directories, create them before first use.
-- Prefer stable file stems derived from the business artifact, for example `wallet-withdraw-v2.md` or `2026-07-15-wallet-hotfix.md`.
-- Keep checker output under `docs/review/...`; do not scatter reports into temp folders, downloads, or issue attachments only.
-- When pasting checker conclusions into an issue, include the durable repo path.
+## Use Canonical Paths
 
-## `prd-qa-checker`
+Keep long-lived feature artifacts under these paths:
 
-Use when:
+| Artifact | Canonical path |
+| --- | --- |
+| PRD | `docs/product/{feature-slug}.md` |
+| UI handoff and local source | `docs/design/{feature-slug}.md`, `docs/design/{feature-slug}.fig` |
+| UI screenshots and assets | `docs/design/{feature-slug}/{screens,assets,exports}/` |
+| Architecture and technical design | `docs/development/{feature-slug}.md` |
+| Shared OpenAPI contract | `docs/development/openapi/openapi.yaml` |
+| Database schema | `docs/development/schema/{feature-slug}.sql` |
+| Test cases and report | `docs/testing/{feature-slug}-test-cases.md`, `docs/testing/{feature-slug}-test-report.md` |
+| Release record | `docs/release/` |
+| Retrospective | `docs/retrospective/{feature-slug}-retro.md` |
+| Generated reports | `docs/review/{module}/` |
 
-- PRD follows or roughly follows the team's PRD template structure
-- Team needs gate advice before design review, technical solutioning, or QA planning
-- CEO / PM / product owner needs a report that can be pasted into an issue comment
+Before creating an artifact, search for an existing canonical feature file. Update that file and append a change record for enhancements or fixes instead of creating a parallel versioned document. Keep design source files and screenshots locally; an online-only link is not a source of truth.
 
-Run path:
+Treat `docs/development/openapi/openapi.yaml` as shared project state. Create it only when absent and never replace it as part of a feature-level overwrite. Do not treat Markdown notes, screenshots, or Postman exports as the canonical API contract.
 
-```bash
-python3 scripts/prd_qa_checker.py \
-  --prd docs/product/your-prd.md \
-  --issue WAR-342 \
-  --output auto
-```
+## Run Modules
 
-Default behavior:
-
-- Reads PRD Markdown
-- Checks template completeness and governance gaps
-- Produces Markdown report to stdout
-- Supports `--output <path>` to save durable report
-- Supports `--output auto` to save to `docs/review/prd-qa/{prd-file-stem}.prd-qa.generated.md`
-
-Before running, read [`references/prd-qa-checker.md`](references/prd-qa-checker.md) for:
-
-- rule coverage
-- severity model
-- output contract
-- limits of automated judgment
-
-## `release-readiness-checker`
-
-Use when:
-
-- release record roughly follows the team's release record template
-- project manager / CTO / DevOps needs a pre-release gate recommendation
-- team needs a paste-ready release comment before entering release-window review
-
-Run path:
+Run commands from this skill's repository root. Replace paths and identifiers with the target workspace values.
 
 ```bash
-python3 scripts/release_readiness_checker.py \
-  --release docs/release/your-release-record.md \
-  --issue WAR-346 \
-  --output auto
+python3 scripts/feature_doc_bootstrap.py --workspace /path/to/repo --feature payment-confirmation --issue WAR-342
+python3 scripts/release_record_bootstrap.py --workspace /path/to/repo --date 2026-07-12 --issue WAR-346 --slug payment-release
+python3 scripts/prd_qa_checker.py --prd docs/product/payment-confirmation.md --issue WAR-342 --output auto
+python3 scripts/ui_design_checker.py --ui docs/design/payment-confirmation.md --issue WAR-342 --output auto
+python3 scripts/architecture_design_checker.py --design docs/development/payment-confirmation.md --issue WAR-342 --output auto
+python3 scripts/api_contract_checker.py --input docs/development/openapi/openapi.yaml --baseline previous-openapi.yaml --fail-on block
+python3 scripts/test_case_checker.py --testcase docs/testing/payment-confirmation-test-cases.md --issue WAR-342 --output auto
+python3 scripts/artifact_consistency_checker.py --workspace /path/to/repo --feature payment-confirmation --stage development --issue WAR-342 --output auto
+python3 scripts/feature_governance_check.py --workspace /path/to/repo --feature payment-confirmation --stage development --issue WAR-342 --output auto
+python3 scripts/release_readiness_checker.py --release docs/release/release-record.md --issue WAR-346 --output auto
+python3 scripts/test_report_checker.py --input docs/testing/payment-confirmation-test-report.md
+python3 scripts/retrospective_checker.py --input docs/retrospective/payment-confirmation-retro.md
+python3 scripts/project_status_checker.py --input docs/project/project-status.yaml
 ```
 
-Default behavior:
+Use `--format json` when another tool consumes a checker result. For CI feature gates, pass `--fail-on revise` or `--fail-on block` to `feature-governance-check`; it returns exit code 1 when the final decision reaches the selected threshold.
+The standalone lifecycle checkers support the same `--fail-on` thresholds. Use `api-contract-checker --baseline` when a previous contract is available to detect removed operations.
 
-- reads release record Markdown
-- checks release gates, version/env clarity, change registration, rollback, monitoring, and smoke inputs
-- produces Markdown report to stdout
-- supports `--output <path>` to save durable report
-- supports `--output auto` to save to `docs/review/release-readiness/{release-file-stem}.release-readiness.generated.md`
+## Apply The Output Contract
 
-Before running, read [`references/release-readiness-checker.md`](references/release-readiness-checker.md) for:
+Return:
 
-- rule coverage
-- severity model
-- output contract
-- limits of automated judgment
-
-## Output Contract
-
-Preferred output shape:
-
-1. module decision:
-   - PRD: `ALLOW_TO_REVIEW`, `REVISE_BEFORE_REVIEW`, or `BLOCK`
-   - Release: `允许发布`, `有条件允许发布`, or `不允许发布`
-2. normalized decision code: `allow`, `revise`, or `block`
-3. risk level: `low`, `medium`, `high`
+1. module-specific decision
+2. normalized decision: `allow`, `revise`, or `block`
+3. risk: `low`, `medium`, or `high`
 4. passed checks
-5. missing or weak items with concrete repair advice
-6. paste-ready issue comment
+5. missing or weak items with concrete repair actions
+6. a paste-ready issue comment when requested
 
-Keep conclusions concrete. Do not claim business correctness; judge document readiness only.
+Aggregate multiple modules using the strictest decision and highest risk. Save durable generated reports under `docs/review/...` and cite that path in issue comments.
 
-## `project-development-standard`
-
-Use when:
-
-- creating or reviewing a project development workflow
-- planning role handoffs across product, UI, architecture, development, QA, release, and retrospective
-- fixing artifact locations and issue comment contracts for future projects
-- deciding whether follow-up changes should be handed to CTO for agent instruction updates
-
-Before acting, read [`references/project-development-standard.md`](references/project-development-standard.md) for:
-
-- end-to-end workflow diagram
-- role, owner, artifact, and path matrix
-- required PRD, UI, technical, development, QA, and release gates
-- issue comment contract
-- CTO handoff rules for other agent changes
-
-## Guardrails
-
-- Treat this skill as governance automation, not product decision authority.
-- If PRD deviates heavily from template, say coverage is partial and lower confidence.
-- Do not invent missing requirements. Flag gap, explain why it blocks downstream teams.
-- For API contracts and design diff, do not pretend implementation exists yet.
-- For release readiness, final go/no-go remains with DevOps / CTO even when the checker says ready.
-
-## Resources
-
-- [`references/prd-qa-checker.md`](references/prd-qa-checker.md): live P1 rules
-- [`references/release-readiness-checker.md`](references/release-readiness-checker.md): live P1 rules
-- [`references/project-development-standard.md`](references/project-development-standard.md): cross-role development workflow and artifact standard
-- [`references/prd-example-input.md`](references/prd-example-input.md): sample input
-- [`references/prd-example-report.md`](references/prd-example-report.md): sample output
-- [`scripts/prd_qa_checker.py`](scripts/prd_qa_checker.py): runnable checker
-- [`references/release-example-input.md`](references/release-example-input.md): sample release record
-- [`references/release-example-report.generated.md`](references/release-example-report.generated.md): generated release report
-- [`scripts/release_readiness_checker.py`](scripts/release_readiness_checker.py): runnable checker
+Do not claim business correctness from structural checks. If an input diverges heavily from its template, state that coverage is partial and lower confidence. Do not invent missing requirements. Final release approval remains with the accountable release owner even when the checker returns `allow`.

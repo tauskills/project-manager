@@ -20,7 +20,7 @@ It does not answer:
 
 Recommended inputs:
 
-- PRD Markdown path, canonical location `docs/product/*.md`
+- PRD Markdown path, canonical location `docs/product/{feature-slug}.md`
 - optional issue identifier
 - optional milestone / release identifier
 
@@ -30,8 +30,7 @@ Recommended durable output path:
 
 Best effort support:
 
-- PRDs that roughly follow `docs/01-product/PRD-TEMPLATE.md`
-- PRDs that roughly follow `docs/product/PRD-TEMPLATE.md`
+- PRDs that roughly follow [PRD Template](../templates/prd-template.md)
 - Markdown headings with Chinese section names
 
 Lower-confidence cases:
@@ -64,6 +63,12 @@ High-risk failures usually mean `BLOCK` or `REVISE_BEFORE_REVIEW`.
 - incomplete basic metadata
 - stale update date
 - weak change log hygiene
+
+## Documentation Policy
+
+- PRD should be maintained per feature, not per small enhancement request
+- if a request only updates an existing feature, update the existing PRD and append an update record
+- avoid creating parallel PRDs for the same feature unless product scope truly splits into two different capabilities
 
 ## Decision Logic
 

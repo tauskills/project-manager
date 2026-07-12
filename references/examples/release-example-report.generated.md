@@ -2,7 +2,7 @@
 
 ## 1. 结论摘要
 
-- 发布记录：`skill-project-manager/references/release-example-input.md`
+- 发布记录：`Release Example Input` (`references/examples/release-example-input.md`)
 - 关联 issue / 里程碑：`WAR-346`
 - 检查结论：`允许发布`
 - 统一决策码：`allow`

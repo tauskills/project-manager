@@ -22,6 +22,7 @@
 ## 2. 发布范围
 
 - 功能：修复支付确认页订单状态延迟刷新
+- 受影响功能文档：`docs/product/payment-confirmation.md`, `docs/design/payment-confirmation.md`, `docs/development/payment-confirmation.md`
 - 配置：新增 `PAYMENT_POLL_INTERVAL`，仅调整读取来源
 - 数据库 / 数据：无
 - 静态资源 / 包体：有，新前端包体

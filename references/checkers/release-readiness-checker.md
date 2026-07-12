@@ -21,7 +21,7 @@ Recommended durable output path:
 
 Best effort support:
 
-- release records that roughly follow `docs/release/RELEASE-RECORD-TEMPLATE.md`
+- release records that roughly follow [Release Record Template](../templates/release-record-template.md)
 - Markdown headings with Chinese section names
 
 Lower-confidence cases:
