@@ -1,6 +1,6 @@
 ---
 name: project-manager
-description: Govern the complete project lifecycle from intake through design, development, QA, release, and closure using repository-owned artifacts, stage-aware gates, risks, and handoffs. Use when Codex needs to bootstrap feature or release records, review a PRD/UI design/technical design/test case/release record, audit cross-artifact consistency, run a lifecycle-stage gate, define role handoffs, or report milestone and artifact-readiness risks. Use project-document-governance instead for document paths, naming, language, and repository archival rules.
+description: Govern the complete project lifecycle from intake through design, development, QA, release, and closure using repository-owned artifacts, stage-aware gates, risks, and handoffs. Use when Codex needs to bootstrap feature or release records, review a PRD/UI design/technical design/test case/release record, audit cross-artifact consistency, run a lifecycle-stage gate, define role handoffs, or report milestone and artifact-readiness risks. Use project-structure-governance instead for document paths, naming, language, and repository archival rules.
 ---
 
 # Project Manager
@@ -26,7 +26,7 @@ Inspect the supplied artifact path and requested outcome, then select the narrow
 
 | Request or artifact | Module | Read before use |
 | --- | --- | --- |
-| Initialize or audit project document paths and language | `$project-document-governance` | Use that skill's canonical layout |
+| Initialize or audit project document paths and language | `$project-structure-governance` | Use that skill's canonical layout |
 | Create a new feature documentation skeleton | `feature-doc-bootstrap` | [New Demand Checklist](references/standards/new-demand-init-checklist.md) |
 | Create an event-scoped release record | `release-record-bootstrap` | [Release Template](references/templates/release-record-template.md) |
 | Review `docs/product/*.md` | `prd-qa-checker` | [PRD QA Rules](references/checkers/prd-qa-checker.md) |
@@ -46,7 +46,7 @@ For a generic project-management check, inspect available documents first. Do no
 
 ## Delegate Document Governance
 
-Use `$project-document-governance` before creating or auditing lifecycle artifacts. Treat its `references/document-layout.json` as the only authoritative path definition and its checker result as the document-storage gate. Do not redefine the complete directory layout in this skill.
+Use `$project-structure-governance` before creating or auditing lifecycle artifacts. Treat its `references/project-layout.json` as the only authoritative path definition and its checker result as the document-storage gate. Do not redefine the complete directory layout in this skill.
 
 Before creating a feature artifact, search its canonical path returned by the document-governance skill. Update an existing feature document and append a change record for enhancements or fixes instead of creating a parallel versioned document. Continue to treat shared project state as non-overwritable during feature initialization.
 

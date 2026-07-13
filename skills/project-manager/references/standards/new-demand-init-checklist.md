@@ -13,7 +13,7 @@
 
 ## 1. 目录初始化
 
-先使用 `$project-document-governance` 初始化并检查业务仓库。目录、项目说明、文档语言和归档合规由该 skill 负责；检查结果达到 `block` 时不得继续生命周期初始化。
+先使用 `$project-structure-governance` 初始化并检查业务仓库。目录、项目说明、文档语言和归档合规由该 skill 负责；检查结果达到 `block` 时不得继续生命周期初始化。
 
 ## 2. 文档骨架初始化
 
@@ -50,7 +50,7 @@
 
 进入开发前必须完成：
 
-1. `$project-document-governance` 检查未返回 `block`，本次需求的文档路径违规项已处理
+1. `$project-structure-governance` 检查未返回 `block`，本次需求的文档路径违规项已处理
 2. PRD 已更新到功能主文档并通过 `prd-qa-checker`
 3. UI 设计已按模板更新到功能主文档，本地设计源文件已保存为 `docs/design/{feature-slug}.fig`，且页面截图已保存到 `docs/design/{feature-slug}/`
 4. 架构与技术设计文档已在功能主文档中按模板补齐

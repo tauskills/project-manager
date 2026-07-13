@@ -1,4 +1,4 @@
-name: Validate skill
+name: Validate skills
 
 on:
   push:
@@ -7,30 +7,62 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        skill:
+          - skills/project-manager
+          - skills/project-structure-governance
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: python -m unittest discover -s tests -v
-      - run: python -m py_compile scripts/*.py tests/*.py
+          cache-dependency-path: skills/project-manager/requirements.txt
+      - run: pip install -r skills/project-manager/requirements.txt
+      - name: Run tests
+        working-directory: ${{ matrix.skill }}
+        run: python -m unittest discover -s tests -v
+      - name: Compile Python sources
+        working-directory: ${{ matrix.skill }}
+        run: python -m py_compile scripts/*.py tests/*.py
       - name: Validate skill metadata
+        env:
+          SKILL_DIR: ${{ matrix.skill }}
         run: |
           python - <<'PY'
           import re
+          import os
           from pathlib import Path
-          text = Path("SKILL.md").read_text()
-          assert re.match(r"^---\nname: [a-z0-9-]+\ndescription: .+\n---\n", text)
+
+          skill_dir = Path(os.environ["SKILL_DIR"])
+          text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+          expected_name = skill_dir.name
+          match = re.match(r"^---\nname: ([a-z0-9-]+)\ndescription: .+\n---\n", text)
+          assert match, f"{skill_dir}: invalid SKILL.md frontmatter"
+          assert match.group(1) == expected_name, f"{skill_dir}: name must match directory"
+          assert (skill_dir / "agents/openai.yaml").is_file(), f"{skill_dir}: missing agents/openai.yaml"
           PY
-      - name: Check local Markdown links
+
+  repository-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check local Markdown links and retired names
         run: |
           python - <<'PY'
           import re
           from pathlib import Path
+
+          errors = []
+          retired_name = "project-document-governance"
           for source in Path(".").rglob("*.md"):
-              for target in re.findall(r"\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)", source.read_text()):
-                  if "://" not in target:
-                      assert (source.parent / target).resolve().exists(), f"{source}: missing {target}"
+              text = source.read_text(encoding="utf-8")
+              if retired_name in text:
+                  errors.append(f"{source}: contains retired skill name {retired_name}")
+              for target in re.findall(r"\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)", text):
+                  if "://" not in target and not (source.parent / target).resolve().exists():
+                      errors.append(f"{source}: missing {target}")
+          assert not errors, "\n".join(errors)
           PY
