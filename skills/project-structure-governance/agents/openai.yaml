@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Structure Governance"
+  short_description: "Scaffold and govern repository file placement"
+  default_prompt: "Use $project-structure-governance to locate, scaffold, or audit repository files against the canonical project structure and naming index."

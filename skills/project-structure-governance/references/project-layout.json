@@ -1,0 +1,78 @@
+{
+  "version": 3,
+  "manifest_path": ".project-structure.json",
+  "manifest_schema": "references/project-manifest.schema.json",
+  "defaults": {
+    "profile": "generic",
+    "documentation_language": "zh-CN",
+    "non_code_name_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+  },
+  "artifact_placeholders": {
+    "{feature-slug}": "[a-z0-9]+(?:-[a-z0-9]+)*",
+    "{source-ext}": "(?:fig|sketch|xd|penpot|drawio)",
+    "{screens|assets|exports}": "(?:screens|assets|exports)",
+    "{yaml|json}": "(?:yaml|json)",
+    "{date}": "\\d{4}-\\d{2}-\\d{2}",
+    "{issue-key}": "(?:[A-Z][A-Z0-9]+-\\d+|no-issue)",
+    "{slug}": "[a-z0-9]+(?:-[a-z0-9]+)*",
+    "{module}": "[a-z0-9]+(?:-[a-z0-9]+)*"
+  },
+  "baseline_zones": [
+    {"path": "scripts", "owner": "engineering", "purpose": "Repository automation and operator-invoked scripts", "naming": "language-native", "bootstrap": true},
+    {"path": "tests", "owner": "engineering", "purpose": "Cross-module and repository-level automated tests", "naming": "mirror-source", "bootstrap": true},
+    {"path": "config", "owner": "engineering", "purpose": "Project-owned non-secret runtime configuration", "naming": "kebab-case", "naming_scope": "all", "bootstrap": true},
+    {"path": "assets", "owner": "design", "purpose": "Repository-owned source assets that are not served directly", "naming": "kebab-case", "naming_scope": "all", "bootstrap": true},
+    {"path": "docs", "owner": "project", "purpose": "Project lifecycle documentation and document assets", "naming": "artifact-index", "bootstrap": true},
+    {"path": ".github", "owner": "engineering", "purpose": "GitHub automation, templates, and repository policy", "naming": "tool-native", "bootstrap": false}
+  ],
+  "profiles": {
+    "generic": {"marker_patterns": [], "zones": [{"path": "src", "owner": "engineering", "purpose": "Product source code", "naming": "language-native", "bootstrap": true}]},
+    "node": {"marker_patterns": ["package.json"], "zones": [{"path": "src", "owner": "engineering", "purpose": "Application and library source code", "naming": "framework-native", "bootstrap": true}, {"path": "public", "owner": "design", "purpose": "Files served without build-time transformation", "naming": "kebab-case", "naming_scope": "all", "bootstrap": false}]},
+    "python": {"marker_patterns": ["pyproject.toml", "setup.py", "setup.cfg"], "zones": [{"path": "src", "owner": "engineering", "purpose": "Importable Python packages using the src layout", "naming": "python-native", "bootstrap": true}]},
+    "go": {"marker_patterns": ["go.mod", "go.work"], "zones": [{"path": "cmd", "owner": "engineering", "purpose": "Executable entry points", "naming": "go-native", "bootstrap": true}, {"path": "internal", "owner": "engineering", "purpose": "Private application and library packages", "naming": "go-native", "bootstrap": true}, {"path": "pkg", "owner": "engineering", "purpose": "Intentionally public reusable packages", "naming": "go-native", "bootstrap": false}]},
+    "rust": {"marker_patterns": ["Cargo.toml"], "zones": [{"path": "src", "owner": "engineering", "purpose": "Rust crate source code", "naming": "rust-native", "bootstrap": true}, {"path": "benches", "owner": "engineering", "purpose": "Cargo benchmarks", "naming": "rust-native", "bootstrap": false}]},
+    "java": {"marker_patterns": ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"], "zones": [{"path": "src", "owner": "engineering", "purpose": "Maven or Gradle source and test trees", "naming": "java-native", "bootstrap": true}]},
+    "dotnet": {"marker_patterns": ["*.sln", "*.slnx", "*.csproj", "global.json"], "zones": [{"path": "src", "owner": "engineering", "purpose": ".NET product projects", "naming": "dotnet-native", "bootstrap": true}]},
+    "ruby": {"marker_patterns": ["Gemfile", "*.gemspec"], "zones": [{"path": "lib", "owner": "engineering", "purpose": "Ruby library source", "naming": "ruby-native", "bootstrap": true}]},
+    "php": {"marker_patterns": ["composer.json"], "zones": [{"path": "src", "owner": "engineering", "purpose": "PSR-compatible PHP source", "naming": "php-native", "bootstrap": true}]},
+    "flutter": {"marker_patterns": ["pubspec.yaml"], "zones": [{"path": "lib", "owner": "engineering", "purpose": "Flutter and Dart product source", "naming": "dart-native", "bootstrap": true}, {"path": "test", "owner": "engineering", "purpose": "Flutter tests", "naming": "dart-native", "bootstrap": true}]},
+    "monorepo": {"marker_patterns": ["pnpm-workspace.yaml", "lerna.json", "nx.json"], "zones": [{"path": "apps", "owner": "engineering", "purpose": "Deployable applications", "naming": "kebab-case", "naming_scope": "children", "bootstrap": true}, {"path": "packages", "owner": "engineering", "purpose": "Shared libraries and tooling packages", "naming": "kebab-case", "naming_scope": "children", "bootstrap": true}]}
+  },
+  "generated_zones": [
+    {"path": "dist", "purpose": "Packaged output"},
+    {"path": "build", "purpose": "Build output"},
+    {"path": "coverage", "purpose": "Test coverage output"},
+    {"path": ".run", "purpose": "Local PID, log, and runtime state"}
+  ],
+  "ignored_zones": [".git", ".idea", ".vscode", ".venv", "venv", "node_modules", "vendor", "target", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"],
+  "allowed_root_files": [
+    ".project-structure.json", ".gitignore", ".gitattributes", ".editorconfig", ".env.example",
+    "AGENTS.md", "README.md", "CONTRIBUTING.md", "CHANGELOG.md", "LICENSE", "Makefile", "Dockerfile", "compose.yaml", "compose.yml",
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "pnpm-workspace.yaml", "pyproject.toml", "setup.py", "setup.cfg", "uv.lock", "poetry.lock", "Pipfile", "Pipfile.lock",
+    "go.mod", "go.sum", "go.work", "go.work.sum", "Cargo.toml", "Cargo.lock", "lerna.json", "nx.json", "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
+    "global.json", "Gemfile", "Gemfile.lock", "composer.json", "composer.lock", "pubspec.yaml", "pubspec.lock", "analysis_options.yaml", "Taskfile.yml", "justfile", ".dockerignore"
+  ],
+  "allowed_root_patterns": ["LICENSE.*", "Dockerfile.*", ".env.*.example", "tsconfig*.json", "vite.config.*", "next.config.*", "eslint.config.*", ".eslintrc*", ".prettierrc*", "requirements*.txt", "rust-toolchain*", "*.sln", "*.slnx", "*.csproj", "*.gemspec"],
+  "prohibited_root_patterns": [".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519", "credentials.json"],
+  "gitignore_patterns": [".env", ".env.*", "!.env.example", "!.env.*.example", ".run/", "dist/", "build/", "coverage/", "__pycache__/", "*.py[cod]", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "node_modules/", "target/"],
+  "required_files": [".project-structure.json", "docs/project/project-overview.md"],
+  "document_directories": [
+    "docs/project", "docs/product", "docs/design", "docs/development", "docs/development/openapi", "docs/development/schema", "docs/testing", "docs/retrospective", "docs/release", "docs/review"
+  ],
+  "document_artifacts": [
+    {"name": "项目说明", "pattern": "docs/project/project-overview.md", "owner": "project"},
+    {"name": "项目状态", "pattern": "docs/project/project-status.yaml", "owner": "project"},
+    {"name": "产品文档", "pattern": "docs/product/{feature-slug}.md", "owner": "product"},
+    {"name": "UI 交接文档", "pattern": "docs/design/{feature-slug}.md", "owner": "design"},
+    {"name": "UI 设计源文件", "pattern": "docs/design/{feature-slug}.{source-ext}", "owner": "design"},
+    {"name": "UI 截图与资源", "pattern": "docs/design/{feature-slug}/{screens|assets|exports}/**", "owner": "design"},
+    {"name": "架构与技术设计", "pattern": "docs/development/{feature-slug}.md", "owner": "architecture"},
+    {"name": "OpenAPI 主文档", "pattern": "docs/development/openapi/openapi.{yaml|json}", "owner": "architecture"},
+    {"name": "数据库 Schema", "pattern": "docs/development/schema/{feature-slug}.sql", "owner": "architecture"},
+    {"name": "测试用例", "pattern": "docs/testing/{feature-slug}-test-cases.md", "owner": "testing"},
+    {"name": "测试报告", "pattern": "docs/testing/{feature-slug}-test-report.md", "owner": "testing"},
+    {"name": "发布记录", "pattern": "docs/release/{date}-{issue-key}-{slug}.md", "owner": "release"},
+    {"name": "复盘记录", "pattern": "docs/retrospective/{feature-slug}-retro.md", "owner": "project"},
+    {"name": "生成的检查报告", "pattern": "docs/review/{module}/**", "owner": "governance"}
+  ]
+}

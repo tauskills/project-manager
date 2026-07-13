@@ -17,7 +17,7 @@
 - `feature-governance-check`：汇总功能级治理检查结果
 - `release-readiness-checker`：检查发布记录和发布门禁是否就绪
 - `release-record-bootstrap`：按标准模板初始化单次发布记录
-- `project-development-standard`：定义跨角色流程、路径规范和交付约束
+- `project-development-standard`：定义跨角色流程、生命周期交接和交付约束
 - `api-contract-checker`：校验 OpenAPI 结构和接口操作
 - `test-report-checker`：检查测试执行证据与结论
 - `retrospective-checker`：检查复盘和改进动作闭环
@@ -31,26 +31,9 @@
 
 文档组织默认按功能聚合，而不是按每次需求单独拆文档。若新需求只是既有功能的补充、优化或修复，应更新原功能文档，并追加更新记录，而不是再创建一套重复文档。
 
-## 目录
+## 文档管理
 
-推荐在业务仓库内使用以下固定目录：
-
-- `docs/product/`：PRD/需求文档
-- `docs/design/`：UI 设计交接文档、本地设计源文件、页面截图、导出资源
-- `docs/development/`：架构与技术设计、OpenAPI、schema
-- `docs/testing/`：测试用例和测试报告
-- `docs/retrospective/`：复盘
-- `docs/release/`：发布记录
-- `docs/project/project-status.yaml`：项目里程碑和风险台账
-- `docs/review/prd-qa/`：PRD 检查输出
-- `docs/review/ui-design/`：UI 设计检查输出
-- `docs/review/test-case/`：测试用例检查输出
-- `docs/review/architecture-design/`：架构与技术设计检查输出
-- `docs/review/artifact-consistency/`：跨文档一致性检查输出
-- `docs/review/feature-governance/`：功能级治理汇总输出
-- `docs/review/release-readiness/`：发布检查输出
-
-其中接口主文档固定为 `docs/development/openapi/openapi.yaml`，UI 设计资产按功能归档到 `docs/design/` 下的本地文件和子目录。
+项目文档目录、命名、中文内容和仓库归档要求由独立的 `$project-document-governance` skill 统一管理。启动生命周期工作前，先使用该 skill 初始化或检查业务仓库的文档布局；本 skill 只负责各阶段产物的内容质量和门禁。
 
 ## 命令
 

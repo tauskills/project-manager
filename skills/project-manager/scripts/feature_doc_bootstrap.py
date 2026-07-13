@@ -24,25 +24,10 @@ TEMPLATE_MAPPINGS = {
 }
 
 DIRECTORIES = [
-    "docs/product",
-    "docs/design",
     "docs/design/{feature_slug}",
     "docs/design/{feature_slug}/screens",
     "docs/design/{feature_slug}/assets",
     "docs/design/{feature_slug}/exports",
-    "docs/development",
-    "docs/development/openapi",
-    "docs/development/schema",
-    "docs/testing",
-    "docs/retrospective",
-    "docs/release",
-    "docs/review/prd-qa",
-    "docs/review/ui-design",
-    "docs/review/test-case",
-    "docs/review/architecture-design",
-    "docs/review/artifact-consistency",
-    "docs/review/feature-governance",
-    "docs/review/release-readiness",
 ]
 
 EXTRA_FILES = {
@@ -100,8 +85,11 @@ def bootstrap(workspace: Path, feature_slug: str, issue_key: str | None, overwri
     for pattern, raw_content in EXTRA_FILES.items():
         target = workspace / pattern.format(feature_slug=feature_slug)
         content = render_template(raw_content, feature_slug, issue_key)
-        # The OpenAPI file is project-wide state, not a feature-owned artifact.
-        protected = {"docs/development/openapi/openapi.yaml", "docs/project/project-status.yaml"}
+        # Project-wide files are shared state, not feature-owned artifacts.
+        protected = {
+            "docs/project/project-status.yaml",
+            "docs/development/openapi/openapi.yaml",
+        }
         allow_overwrite = overwrite and pattern not in protected
         status = write_if_missing(target, content, allow_overwrite)
         results.append((str(target), status))

@@ -1,6 +1,6 @@
 ---
 name: project-manager
-description: Govern the complete project lifecycle from intake through design, development, QA, release, and closure using repository-owned artifacts, stage-aware gates, risks, and handoffs. Use when Codex needs to bootstrap feature or release records, review a PRD/UI design/technical design/test case/release record, audit cross-artifact consistency, run a lifecycle-stage gate, define project handoffs, or report milestone and documentation risks tied to issue threads and repository docs.
+description: Govern the complete project lifecycle from intake through design, development, QA, release, and closure using repository-owned artifacts, stage-aware gates, risks, and handoffs. Use when Codex needs to bootstrap feature or release records, review a PRD/UI design/technical design/test case/release record, audit cross-artifact consistency, run a lifecycle-stage gate, define role handoffs, or report milestone and artifact-readiness risks. Use project-document-governance instead for document paths, naming, language, and repository archival rules.
 ---
 
 # Project Manager
@@ -26,6 +26,7 @@ Inspect the supplied artifact path and requested outcome, then select the narrow
 
 | Request or artifact | Module | Read before use |
 | --- | --- | --- |
+| Initialize or audit project document paths and language | `$project-document-governance` | Use that skill's canonical layout |
 | Create a new feature documentation skeleton | `feature-doc-bootstrap` | [New Demand Checklist](references/standards/new-demand-init-checklist.md) |
 | Create an event-scoped release record | `release-record-bootstrap` | [Release Template](references/templates/release-record-template.md) |
 | Review `docs/product/*.md` | `prd-qa-checker` | [PRD QA Rules](references/checkers/prd-qa-checker.md) |
@@ -39,30 +40,15 @@ Inspect the supplied artifact path and requested outcome, then select the narrow
 | Audit one feature across all artifacts | `artifact-consistency-checker` | [Consistency Rules](references/checkers/artifact-consistency-checker.md) |
 | Run the complete feature gate | `feature-governance-check` | [Governance Rules](references/checkers/feature-governance-check.md) |
 | Review `docs/release/*.md` | `release-readiness-checker` | [Release Rules](references/checkers/release-readiness-checker.md) |
-| Define workflow, roles, paths, or handoffs | `project-development-standard` | [Development Standard](references/standards/project-development-standard.md) |
+| Define lifecycle workflow, roles, or handoffs | `project-development-standard` | [Development Standard](references/standards/project-development-standard.md) |
 
 For a generic project-management check, inspect available documents first. Do not guess the module from the request wording alone. For API contract or design-to-implementation diff requests, apply the manual development standard; dedicated automated modules do not exist yet.
 
-## Use Canonical Paths
+## Delegate Document Governance
 
-Keep long-lived feature artifacts under these paths:
+Use `$project-document-governance` before creating or auditing lifecycle artifacts. Treat its `references/document-layout.json` as the only authoritative path definition and its checker result as the document-storage gate. Do not redefine the complete directory layout in this skill.
 
-| Artifact | Canonical path |
-| --- | --- |
-| PRD | `docs/product/{feature-slug}.md` |
-| UI handoff and local source | `docs/design/{feature-slug}.md`, `docs/design/{feature-slug}.fig` |
-| UI screenshots and assets | `docs/design/{feature-slug}/{screens,assets,exports}/` |
-| Architecture and technical design | `docs/development/{feature-slug}.md` |
-| Shared OpenAPI contract | `docs/development/openapi/openapi.yaml` |
-| Database schema | `docs/development/schema/{feature-slug}.sql` |
-| Test cases and report | `docs/testing/{feature-slug}-test-cases.md`, `docs/testing/{feature-slug}-test-report.md` |
-| Release record | `docs/release/` |
-| Retrospective | `docs/retrospective/{feature-slug}-retro.md` |
-| Generated reports | `docs/review/{module}/` |
-
-Before creating an artifact, search for an existing canonical feature file. Update that file and append a change record for enhancements or fixes instead of creating a parallel versioned document. Keep design source files and screenshots locally; an online-only link is not a source of truth.
-
-Treat `docs/development/openapi/openapi.yaml` as shared project state. Create it only when absent and never replace it as part of a feature-level overwrite. Do not treat Markdown notes, screenshots, or Postman exports as the canonical API contract.
+Before creating a feature artifact, search its canonical path returned by the document-governance skill. Update an existing feature document and append a change record for enhancements or fixes instead of creating a parallel versioned document. Continue to treat shared project state as non-overwritable during feature initialization.
 
 ## Run Modules
 

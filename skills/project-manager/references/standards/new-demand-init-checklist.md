@@ -13,23 +13,7 @@
 
 ## 1. 目录初始化
 
-确认业务仓库中存在以下目录：
-
-- `docs/product/`
-- `docs/design/`
-- `docs/development/`
-- `docs/development/openapi/`
-- `docs/development/schema/`
-- `docs/testing/`
-- `docs/retrospective/`
-- `docs/release/`
-- `docs/review/prd-qa/`
-- `docs/review/ui-design/`
-- `docs/review/test-case/`
-- `docs/review/architecture-design/`
-- `docs/review/artifact-consistency/`
-- `docs/review/feature-governance/`
-- `docs/review/release-readiness/`
+先使用 `$project-document-governance` 初始化并检查业务仓库。目录、项目说明、文档语言和归档合规由该 skill 负责；检查结果达到 `block` 时不得继续生命周期初始化。
 
 ## 2. 文档骨架初始化
 
@@ -66,14 +50,15 @@
 
 进入开发前必须完成：
 
-1. PRD 已更新到功能主文档并通过 `prd-qa-checker`
-2. UI 设计已按模板更新到功能主文档，本地设计源文件已保存为 `docs/design/{feature-slug}.fig`，且页面截图已保存到 `docs/design/{feature-slug}/`
-3. 架构与技术设计文档已在功能主文档中按模板补齐
-4. `openapi.yaml` 更新完成
-5. `schema` 脚本更新完成
-6. 测试用例已按模板更新到功能主文档
-7. 架构与技术设计文档通过 `architecture-design-checker`
-8. 发布后按模板补齐功能复盘文档
+1. `$project-document-governance` 检查未返回 `block`，本次需求的文档路径违规项已处理
+2. PRD 已更新到功能主文档并通过 `prd-qa-checker`
+3. UI 设计已按模板更新到功能主文档，本地设计源文件已保存为 `docs/design/{feature-slug}.fig`，且页面截图已保存到 `docs/design/{feature-slug}/`
+4. 架构与技术设计文档已在功能主文档中按模板补齐
+5. `openapi.yaml` 更新完成
+6. `schema` 脚本更新完成
+7. 测试用例已按模板更新到功能主文档
+8. 架构与技术设计文档通过 `architecture-design-checker`
+9. 发布后按模板补齐功能复盘文档
 
 ## 5. 推荐命令
 
