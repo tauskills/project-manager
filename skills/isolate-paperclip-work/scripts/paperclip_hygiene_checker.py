@@ -333,8 +333,11 @@ def check_process_area(
         return references, contexts, changed_paths
 
     session_paths = sorted(sessions_root.iterdir())
-    if selected_session and not (sessions_root / selected_session).is_dir():
+    selected_path = sessions_root / selected_session if selected_session else None
+    if selected_path is not None and not selected_path.is_dir():
         findings.append(finding("block", "session.selected_missing", f"{PROCESS_RELATIVE.as_posix()}/sessions/{selected_session}", "The selected session does not exist.", "Pass an existing session key."))
+    if selected_path is not None and selected_path.is_dir():
+        session_paths = [selected_path]
     for session in session_paths:
         session_rel = relative_path(workspace, session)
         if session.is_symlink():

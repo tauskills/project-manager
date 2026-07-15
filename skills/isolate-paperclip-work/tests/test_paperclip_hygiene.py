@@ -257,6 +257,75 @@ class PaperclipSessionTests(unittest.TestCase):
             self.assertFalse(first.exists())
             self.assertFalse(second.exists())
 
+    def test_close_preserves_preexisting_dirty_ownership_after_aggregate_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            (workspace / "playing").write_text("legacy marker\n", encoding="utf-8")
+            git(workspace, "add", "playing")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "add legacy marker",
+            )
+
+            (workspace / "docs").mkdir()
+            (workspace / "scripts").mkdir()
+            (workspace / "docs/game-type.md").write_text("# Game type\n", encoding="utf-8")
+            (workspace / "README.md").write_text("# Existing owner change\n", encoding="utf-8")
+            (workspace / "scripts/server.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (workspace / "playing").unlink()
+            session = create_session(
+                workspace,
+                "game-type-docs",
+                ["docs/game-type.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/game-type.md"],
+                started_at=FIXED_TIME,
+            )
+            (session / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+
+            git(workspace, "add", "-A")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "aggregate workspace changes",
+            )
+
+            result = close_session(workspace, session.name)
+            self.assertTrue(result["closed"])
+            self.assertEqual("allow", result["decision"])
+            self.assertEqual(["docs/game-type.md"], result["delivery"]["changed_paths"])
+
+    def test_aggregate_commit_still_blocks_path_created_after_session_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = create_session(
+                workspace,
+                "game-type-docs",
+                ["docs/game-type.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            (workspace / "unclaimed.txt").write_text("unclaimed\n", encoding="utf-8")
+            git(workspace, "add", "-A")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "aggregate workspace changes",
+            )
+
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn(
+                ("scope.outside", "unclaimed.txt"),
+                {(item["code"], item["path"]) for item in report["findings"]},
+            )
+
     def test_peer_session_does_not_hide_unclaimed_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -580,6 +649,22 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             report = analyze(workspace)
             self.assertEqual("block", report["decision"])
             self.assertIn("process.sessions_symlink", {item["code"] for item in report["findings"]})
+
+    def test_selected_session_audit_does_not_own_malformed_peer_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = self.make_session(workspace)
+            peer = workspace / ".run/paperclip/sessions/20260715T103001Z-browser-evidence"
+            (peer / "scratch").mkdir(parents=True)
+            (peer / "scratch/runtime-link").symlink_to(workspace / "README.md")
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("allow", report["decision"])
+            self.assertNotIn(
+                "process.nested_symlink",
+                {item["code"] for item in report["findings"]},
+            )
 
     def test_allow_path_never_hides_current_task_reference(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

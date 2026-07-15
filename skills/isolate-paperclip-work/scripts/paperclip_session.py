@@ -331,7 +331,13 @@ def effective_changed_paths(
             path_matches_contract(relative, allowed)
             and not path_matches_contract(relative, forbidden)
         )
-        or not peer_session_claims_path(workspace, selected_session_key, relative)
+        or not (
+            relative in baseline
+            and isinstance(baseline[relative], dict)
+            and baseline[relative].get("fingerprint")
+            == fingerprint_workspace_path(workspace, relative)
+        )
+        and not peer_session_claims_path(workspace, selected_session_key, relative)
     ]
 
 
