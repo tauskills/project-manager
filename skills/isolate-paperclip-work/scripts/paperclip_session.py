@@ -349,6 +349,7 @@ def active_peer_sessions(workspace: Path, selected_session_key: str) -> list[Pat
             continue
         if (
             isinstance(context, dict)
+            and context.get("schema_version") == 2
             and context.get("status") == "active"
             and contract_digest_is_valid(context)
         ):
@@ -367,11 +368,20 @@ def purge_closed_discard_sessions(workspace: Path) -> None:
             context = json.loads((session / "context.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        try:
+            delivery = json.loads((session / "delivery.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
         if (
             isinstance(context, dict)
+            and context.get("schema_version") == 2
             and context.get("status") == "closed"
             and context.get("retention") == "discard"
             and contract_digest_is_valid(context)
+            and isinstance(delivery, dict)
+            and delivery_digest_is_valid(delivery)
+            and delivery.get("status") == "closed"
+            and delivery.get("hygiene_decision") == "allow"
         ):
             shutil.rmtree(session)
 
@@ -589,9 +599,13 @@ def close_session(
         "session_key": session_key,
         "generated_at": normalize_time(None).isoformat().replace("+00:00", "Z"),
         "status": "pending",
-        "changed_paths": effective_changed_paths(workspace, context),
+        "changed_paths": effective_changed_paths(workspace, context, session_key),
         "expected_outputs": output_results,
         "verification": verification,
+    }
+    delivery["owned_path_fingerprints"] = {
+        relative: fingerprint_workspace_path(workspace, relative)
+        for relative in delivery["changed_paths"]
     }
     if archive_ref:
         delivery["archive_ref"] = archive_ref
@@ -651,9 +665,10 @@ def close_session(
     delivery["closed_at"] = closed_at
     write_delivery(delivery_path, delivery)
 
-    purged = context.get("retention") == "discard"
-    if purged:
-        shutil.rmtree(session)
+    no_active_peers = not active_peer_sessions(workspace, session_key)
+    purged = context.get("retention") == "discard" and no_active_peers
+    if no_active_peers:
+        purge_closed_discard_sessions(workspace)
     return {"closed": True, "purged": purged, "delivery": delivery, "decision": "allow"}
 
 

@@ -278,7 +278,7 @@ def check_scope(
         findings.append(finding("block", "scope.baseline_missing", relative, "The session has no valid Git baseline.", "Recreate the session before modifying project files."))
         return []
     try:
-        changed = effective_changed_paths(workspace, context)
+        changed = effective_changed_paths(workspace, context, session.name)
     except ValueError as exc:
         findings.append(finding("block", "scope.git_error", relative, str(exc), "Restore the repository baseline or recreate the session."))
         return []
@@ -464,7 +464,7 @@ def check_project_assets(
             if ref in text:
                 findings.append(finding("block", f"leak.{kind}.content", relative, f"The file contains the current {kind}.", "Remove the execution reference and retain only a project-owned reference if required."))
                 leaks += 1
-        if relative != ".gitignore" and PROCESS_LINK_RE.search(text):
+        if relative != ".gitignore" and PROCESS_LINK_RE.search(text) and not allowed:
             findings.append(finding("block", "leak.process_dependency", relative, "A project asset refers to the local Paperclip process area.", "Remove the link or dependency and cite project-owned evidence."))
             leaks += 1
         if relative != ".gitignore" and PAPERCLIP_CONTEXT_RE.search(text) and not allowed:

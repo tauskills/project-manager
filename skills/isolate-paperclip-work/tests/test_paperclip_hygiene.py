@@ -3,7 +3,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from scripts.paperclip_hygiene_checker import analyze, validate_allow_paths
@@ -217,6 +217,103 @@ class PaperclipSessionTests(unittest.TestCase):
             result = close_session(workspace, session.name)
             self.assertFalse(result["closed"])
             self.assertIn("expected outputs", result["findings"][0].lower())
+
+    def test_close_attributes_changes_to_peer_sessions_until_all_close(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            first = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"],
+                started_at=FIXED_TIME,
+            )
+            second = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/checkout-policy.md"],
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment policy\n", encoding="utf-8")
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            for session in (first, second):
+                (session / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+
+            first_result = close_session(workspace, first.name)
+            self.assertTrue(first_result["closed"])
+            self.assertFalse(first_result["purged"])
+            self.assertEqual(["docs/payment-policy.md"], first_result["delivery"]["changed_paths"])
+            self.assertTrue(first.exists())
+
+            second_result = close_session(workspace, second.name)
+            self.assertTrue(second_result["closed"])
+            self.assertTrue(second_result["purged"])
+            self.assertEqual(["docs/checkout-policy.md"], second_result["delivery"]["changed_paths"])
+            self.assertFalse(first.exists())
+            self.assertFalse(second.exists())
+
+    def test_peer_session_does_not_hide_unclaimed_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            first = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "README.md").write_text("# Unclaimed change\n", encoding="utf-8")
+
+            report = analyze(workspace, selected_session=first.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("scope.outside", {item["code"] for item in report["findings"]})
+
+    def test_external_archive_closure_cleans_closed_discard_peer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            discard = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"],
+                started_at=FIXED_TIME,
+            )
+            archive = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/checkout-policy.md"],
+                retention="external-archive",
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment policy\n", encoding="utf-8")
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            for session in (discard, archive):
+                (session / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+
+            self.assertTrue(close_session(workspace, discard.name)["closed"])
+            archive_result = close_session(workspace, archive.name, archive_ref="audit://records/42")
+            self.assertTrue(archive_result["closed"])
+            self.assertFalse(archive_result["purged"])
+            self.assertFalse(discard.exists())
+            self.assertTrue(archive.exists())
 
     def test_manual_status_edit_cannot_bypass_purge(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -505,6 +602,24 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "too broad"):
             validate_allow_paths(["src"])
+
+    def test_allow_path_accepts_intentional_process_integration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            integration = workspace / "src/integrations/paperclip"
+            integration.mkdir(parents=True)
+            (integration / "runtime.py").write_text(
+                "PROCESS_ROOT = '.run/paperclip'\n",
+                encoding="utf-8",
+            )
+
+            report = analyze(
+                workspace,
+                allow_paths=["src/integrations/paperclip/runtime.py"],
+            )
+            self.assertEqual("allow", report["decision"])
+            self.assertNotIn("leak.process_dependency", {item["code"] for item in report["findings"]})
 
 
 if __name__ == "__main__":
