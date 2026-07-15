@@ -17,6 +17,7 @@ try:
         is_git_ignored,
         path_matches_contract,
         validate_contract_paths,
+        validate_session_key_list,
         validate_verification_commands,
     )
 except ImportError:  # Support direct execution from the skill directory.
@@ -31,6 +32,7 @@ except ImportError:  # Support direct execution from the skill directory.
         is_git_ignored,
         path_matches_contract,
         validate_contract_paths,
+        validate_session_key_list,
         validate_verification_commands,
     )
 
@@ -271,6 +273,9 @@ def check_scope(
         forbidden = validate_contract_paths(forbidden, "forbidden path")
         validate_verification_commands(commands)
         validate_contract_paths(context.get("expected_outputs", []), "expected output", allow_globs=False)
+        if "overlapping_session_keys" not in context:
+            raise ValueError("session context does not record overlapping_session_keys")
+        validate_session_key_list(context["overlapping_session_keys"])
     except (AttributeError, TypeError, ValueError) as exc:
         findings.append(finding("block", "scope.contract_invalid", relative, str(exc), "Create a new session with a valid minimal contract."))
         return []

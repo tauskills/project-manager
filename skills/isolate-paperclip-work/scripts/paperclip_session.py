@@ -22,7 +22,8 @@ BROAD_CONTRACT_PATHS = {".", "*", "**", "./**"}
 CONTRACT_FIELDS = (
     "schema_version", "tool", "session_key", "domain_slug", "started_at", "status", "closed_at", "retention",
     "allowed_paths", "forbidden_paths", "expected_outputs", "verification_commands",
-    "baseline_head", "baseline_changes", "managed_gitignore_fingerprint", "task_ref", "agent_ref",
+    "baseline_head", "baseline_changes", "overlapping_session_keys", "managed_gitignore_fingerprint",
+    "task_ref", "agent_ref",
 )
 
 
@@ -219,6 +220,28 @@ def fingerprint_workspace_path(workspace: Path, relative: str) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
+def fingerprint_git_path(workspace: Path, revision: str, relative: str) -> str:
+    tree = git_command(workspace, "ls-tree", "-z", revision, "--", relative)
+    if tree is None or tree.returncode != 0:
+        raise ValueError(f"unable to inspect {relative} at session baseline")
+    entries = [entry for entry in tree.stdout.split(b"\0") if entry]
+    if not entries:
+        return "missing"
+    metadata, separator, tree_path = entries[0].partition(b"\t")
+    fields = metadata.split()
+    if not separator or len(fields) != 3 or tree_path.decode("utf-8", errors="surrogateescape") != relative:
+        raise ValueError(f"unable to inspect {relative} at session baseline")
+    mode, object_type, object_id = (field.decode("ascii", errors="strict") for field in fields)
+    if object_type != "blob":
+        return "non-file"
+    content = git_command(workspace, "cat-file", "blob", object_id)
+    if content is None or content.returncode != 0:
+        raise ValueError(f"unable to read {relative} at session baseline")
+    if mode == "120000":
+        return f"symlink:{content.stdout.decode('utf-8', errors='surrogateescape')}"
+    return f"sha256:{hashlib.sha256(content.stdout).hexdigest()}"
+
+
 def capture_dirty_baseline(workspace: Path) -> dict[str, dict[str, str]]:
     process = PROCESS_RELATIVE.as_posix()
     return {
@@ -248,9 +271,51 @@ def committed_paths_since(workspace: Path, baseline_head: str) -> set[str]:
     return paths
 
 
+def validate_session_key_list(value: object, field: str = "overlapping_session_keys") -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be a list of session keys")
+    invalid = [item for item in value if not SESSION_KEY_RE.fullmatch(item)]
+    if invalid:
+        raise ValueError(f"invalid {field}: {invalid[0]}")
+    return list(dict.fromkeys(value))
+
+
+def sessions_overlap(
+    selected_session_key: str,
+    selected_context: dict,
+    peer_session_key: str,
+    peer_context: dict,
+) -> bool:
+    try:
+        selected_peers = validate_session_key_list(selected_context.get("overlapping_session_keys", []))
+        peer_peers = validate_session_key_list(peer_context.get("overlapping_session_keys", []))
+    except ValueError:
+        return False
+    return peer_session_key in selected_peers or selected_session_key in peer_peers
+
+
+def path_changed_since_session_baseline(workspace: Path, context: dict, relative: str) -> bool:
+    baseline_head = context.get("baseline_head")
+    baseline = context.get("baseline_changes")
+    if not isinstance(baseline_head, str) or not isinstance(baseline, dict):
+        return False
+    record = baseline.get(relative)
+    if record is not None:
+        if not isinstance(record, dict) or not isinstance(record.get("fingerprint"), str):
+            return False
+        baseline_fingerprint = record["fingerprint"]
+    else:
+        try:
+            baseline_fingerprint = fingerprint_git_path(workspace, baseline_head, relative)
+        except ValueError:
+            return False
+    return baseline_fingerprint != fingerprint_workspace_path(workspace, relative)
+
+
 def peer_session_claims_path(
     workspace: Path,
     selected_session_key: str,
+    selected_context: dict,
     relative: str,
 ) -> bool:
     sessions_root = workspace / PROCESS_RELATIVE / "sessions"
@@ -268,6 +333,7 @@ def peer_session_claims_path(
             or context.get("schema_version") != 2
             or context.get("status") not in {"active", "closed"}
             or not contract_digest_is_valid(context)
+            or not sessions_overlap(selected_session_key, selected_context, session.name, context)
         ):
             continue
         try:
@@ -278,7 +344,7 @@ def peer_session_claims_path(
         if not path_matches_contract(relative, allowed) or path_matches_contract(relative, forbidden):
             continue
         if context.get("status") == "active":
-            return True
+            return path_changed_since_session_baseline(workspace, context, relative)
         try:
             delivery = json.loads((session / "delivery.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -337,15 +403,24 @@ def effective_changed_paths(
             and baseline[relative].get("fingerprint")
             == fingerprint_workspace_path(workspace, relative)
         )
-        and not peer_session_claims_path(workspace, selected_session_key, relative)
+        and not peer_session_claims_path(workspace, selected_session_key, context, relative)
     ]
 
 
-def active_peer_sessions(workspace: Path, selected_session_key: str) -> list[Path]:
+def active_peer_sessions(
+    workspace: Path,
+    selected_session_key: str,
+    selected_context: dict | None = None,
+) -> list[Path]:
     sessions_root = workspace / PROCESS_RELATIVE / "sessions"
     peers = []
     if not sessions_root.is_dir() or sessions_root.is_symlink():
         return peers
+    if selected_context is None:
+        try:
+            selected_context = load_context(session_path(workspace, selected_session_key))
+        except (OSError, ValueError):
+            return peers
     for session in sessions_root.iterdir():
         if session.name == selected_session_key or not session.is_dir() or session.is_symlink():
             continue
@@ -356,8 +431,11 @@ def active_peer_sessions(workspace: Path, selected_session_key: str) -> list[Pat
         if (
             isinstance(context, dict)
             and context.get("schema_version") == 2
-            and context.get("status") == "active"
-            and contract_digest_is_valid(context)
+            and sessions_overlap(selected_session_key, selected_context, session.name, context)
+            and (
+                context.get("status") == "active"
+                or not contract_digest_is_valid(context)
+            )
         ):
             peers.append(session)
     return peers
@@ -388,8 +466,31 @@ def purge_closed_discard_sessions(workspace: Path) -> None:
             and delivery_digest_is_valid(delivery)
             and delivery.get("status") == "closed"
             and delivery.get("hygiene_decision") == "allow"
+            and not active_peer_sessions(workspace, session.name, context)
         ):
             shutil.rmtree(session)
+
+
+def active_session_keys(workspace: Path) -> list[str]:
+    sessions_root = workspace / PROCESS_RELATIVE / "sessions"
+    if not sessions_root.is_dir() or sessions_root.is_symlink():
+        return []
+    keys = []
+    for session in sessions_root.iterdir():
+        if not session.is_dir() or session.is_symlink() or not SESSION_KEY_RE.fullmatch(session.name):
+            continue
+        try:
+            context = json.loads((session / "context.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(context, dict)
+            and context.get("schema_version") == 2
+            and context.get("status") == "active"
+            and contract_digest_is_valid(context)
+        ):
+            keys.append(session.name)
+    return sorted(keys)
 
 
 def create_session(
@@ -422,6 +523,7 @@ def create_session(
     ensure_gitignore(workspace)
     gitignore_after = fingerprint_workspace_path(workspace, ".gitignore")
     baseline_changes = capture_dirty_baseline(workspace)
+    overlapping_session_keys = active_session_keys(workspace)
 
     started = normalize_time(started_at)
     session_key = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{slug}"
@@ -444,6 +546,7 @@ def create_session(
         "verification_commands": commands,
         "baseline_head": baseline_head,
         "baseline_changes": baseline_changes,
+        "overlapping_session_keys": overlapping_session_keys,
     }
     if gitignore_before != gitignore_after:
         context["managed_gitignore_fingerprint"] = gitignore_after
@@ -671,7 +774,7 @@ def close_session(
     delivery["closed_at"] = closed_at
     write_delivery(delivery_path, delivery)
 
-    no_active_peers = not active_peer_sessions(workspace, session_key)
+    no_active_peers = not active_peer_sessions(workspace, session_key, context)
     purged = context.get("retention") == "discard" and no_active_peers
     if no_active_peers:
         purge_closed_discard_sessions(workspace)
@@ -685,6 +788,8 @@ def purge_session(workspace: Path, session_key: str, force: bool = False) -> Non
         raise ValueError("refusing to purge a session with a mismatched contract or status digest")
     if not force and context.get("status") != "closed":
         raise ValueError("refusing to purge a session that is not closed; use --force only for abandoned work")
+    if not force and active_peer_sessions(workspace, session_key, context):
+        raise ValueError("refusing to purge ownership evidence while an overlapping session is active")
     if not force and context.get("retention") == "external-archive":
         try:
             delivery = json.loads((session / "delivery.json").read_text(encoding="utf-8"))

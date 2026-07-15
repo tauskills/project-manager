@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -256,6 +257,274 @@ class PaperclipSessionTests(unittest.TestCase):
             self.assertEqual(["docs/checkout-policy.md"], second_result["delivery"]["changed_paths"])
             self.assertFalse(first.exists())
             self.assertFalse(second.exists())
+
+    def test_create_records_active_overlap_in_immutable_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            first = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            second = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+
+            first_context = json.loads((first / "context.json").read_text(encoding="utf-8"))
+            second_context = json.loads((second / "context.json").read_text(encoding="utf-8"))
+            self.assertEqual([], first_context["overlapping_session_keys"])
+            self.assertEqual([first.name], second_context["overlapping_session_keys"])
+            self.assertEqual("allow", analyze(workspace, selected_session=first.name)["decision"])
+            self.assertEqual("allow", analyze(workspace, selected_session=second.name)["decision"])
+
+    def test_active_peer_only_claims_change_after_its_own_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            (workspace / "README.md").write_text("# Earlier unclaimed change\n", encoding="utf-8")
+            create_session(
+                workspace,
+                "readme-policy",
+                ["README.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn(
+                ("scope.outside", "README.md"),
+                {(item["code"], item["path"]) for item in report["findings"]},
+            )
+
+    def test_interleaved_commits_can_close_newer_session_first(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            first = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"],
+                started_at=FIXED_TIME,
+            )
+            second = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/checkout-policy.md"],
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-policy.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "add payment policy",
+            )
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/checkout-policy.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "add checkout policy",
+            )
+            for session in (first, second):
+                (session / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+
+            second_result = close_session(workspace, second.name)
+            self.assertTrue(second_result["closed"])
+            self.assertFalse(second_result["purged"])
+            first_result = close_session(workspace, first.name)
+            self.assertTrue(first_result["closed"])
+            self.assertTrue(first_result["purged"])
+
+    def test_normal_purge_preserves_closed_peer_evidence_until_overlap_closes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            first = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"],
+                started_at=FIXED_TIME,
+            )
+            second = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment policy\n", encoding="utf-8")
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            (first / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+
+            self.assertTrue(close_session(workspace, first.name)["closed"])
+            with self.assertRaisesRegex(ValueError, "ownership evidence"):
+                purge_session(workspace, first.name)
+
+            purge_session(workspace, first.name, force=True)
+            report = analyze(workspace, selected_session=second.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("scope.outside", {item["code"] for item in report["findings"]})
+
+    def test_normal_purge_preserves_evidence_for_corrupt_overlapping_peer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            first = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"],
+                started_at=FIXED_TIME,
+            )
+            second = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment policy\n", encoding="utf-8")
+            (first / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+            self.assertTrue(close_session(workspace, first.name)["closed"])
+
+            second_context_path = second / "context.json"
+            second_context = json.loads(second_context_path.read_text(encoding="utf-8"))
+            second_context["agent_ref"] = "tampered-owner"
+            second_context_path.write_text(json.dumps(second_context), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "ownership evidence"):
+                purge_session(workspace, first.name)
+            self.assertTrue(first.exists())
+
+    def test_corrupt_peer_contract_cannot_claim_outside_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            context_path = peer / "context.json"
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+            context["agent_ref"] = "tampered-owner"
+            context_path.write_text(json.dumps(context), encoding="utf-8")
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn(
+                ("scope.outside", "docs/checkout-policy.md"),
+                {(item["code"], item["path"]) for item in report["findings"]},
+            )
+
+    def test_missing_peer_cannot_claim_outside_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            shutil.rmtree(peer)
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("scope.outside", {item["code"] for item in report["findings"]})
+
+    def test_reverted_peer_commit_is_not_ownership_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            checkout_path = workspace / "docs/checkout-policy.md"
+            checkout_path.write_text("# Checkout policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/checkout-policy.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "add checkout policy",
+            )
+            checkout_path.unlink()
+            git(workspace, "add", "-u", "docs/checkout-policy.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "revert checkout policy",
+            )
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn(
+                ("scope.outside", "docs/checkout-policy.md"),
+                {(item["code"], item["path"]) for item in report["findings"]},
+            )
 
     def test_close_preserves_preexisting_dirty_ownership_after_aggregate_commit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
