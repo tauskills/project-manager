@@ -16,3 +16,5 @@ venv/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+# Paperclip local execution workspace
+/.run/paperclip/

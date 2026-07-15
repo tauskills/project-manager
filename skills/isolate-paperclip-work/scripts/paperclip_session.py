@@ -248,7 +248,58 @@ def committed_paths_since(workspace: Path, baseline_head: str) -> set[str]:
     return paths
 
 
-def effective_changed_paths(workspace: Path, context: dict) -> list[str]:
+def peer_session_claims_path(
+    workspace: Path,
+    selected_session_key: str,
+    relative: str,
+) -> bool:
+    sessions_root = workspace / PROCESS_RELATIVE / "sessions"
+    if not sessions_root.is_dir() or sessions_root.is_symlink():
+        return False
+    for session in sessions_root.iterdir():
+        if session.name == selected_session_key or not session.is_dir() or session.is_symlink():
+            continue
+        try:
+            context = json.loads((session / "context.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            not isinstance(context, dict)
+            or context.get("schema_version") != 2
+            or context.get("status") not in {"active", "closed"}
+            or not contract_digest_is_valid(context)
+        ):
+            continue
+        try:
+            allowed = validate_contract_paths(context.get("allowed_paths", []), "allowed path")
+            forbidden = validate_contract_paths(context.get("forbidden_paths", []), "forbidden path")
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if not path_matches_contract(relative, allowed) or path_matches_contract(relative, forbidden):
+            continue
+        if context.get("status") == "active":
+            return True
+        try:
+            delivery = json.loads((session / "delivery.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        fingerprints = delivery.get("owned_path_fingerprints", {}) if isinstance(delivery, dict) else {}
+        if (
+            delivery_digest_is_valid(delivery)
+            and delivery.get("status") == "closed"
+            and delivery.get("hygiene_decision") == "allow"
+            and isinstance(fingerprints, dict)
+            and fingerprints.get(relative) == fingerprint_workspace_path(workspace, relative)
+        ):
+            return True
+    return False
+
+
+def effective_changed_paths(
+    workspace: Path,
+    context: dict,
+    selected_session_key: str | None = None,
+) -> list[str]:
     baseline_head = context.get("baseline_head")
     baseline = context.get("baseline_changes", {})
     if not isinstance(baseline_head, str) or not isinstance(baseline, dict):
@@ -266,10 +317,63 @@ def effective_changed_paths(workspace: Path, context: dict) -> list[str]:
     if managed_gitignore and fingerprint_workspace_path(workspace, ".gitignore") == managed_gitignore:
         effective.discard(".gitignore")
     process = PROCESS_RELATIVE.as_posix()
-    return sorted(
+    changed = sorted(
         relative for relative in effective
         if relative != process and not relative.startswith(f"{process}/")
     )
+    if not selected_session_key:
+        return changed
+    allowed = validate_contract_paths(context.get("allowed_paths", []), "allowed path")
+    forbidden = validate_contract_paths(context.get("forbidden_paths", []), "forbidden path")
+    return [
+        relative for relative in changed
+        if (
+            path_matches_contract(relative, allowed)
+            and not path_matches_contract(relative, forbidden)
+        )
+        or not peer_session_claims_path(workspace, selected_session_key, relative)
+    ]
+
+
+def active_peer_sessions(workspace: Path, selected_session_key: str) -> list[Path]:
+    sessions_root = workspace / PROCESS_RELATIVE / "sessions"
+    peers = []
+    if not sessions_root.is_dir() or sessions_root.is_symlink():
+        return peers
+    for session in sessions_root.iterdir():
+        if session.name == selected_session_key or not session.is_dir() or session.is_symlink():
+            continue
+        try:
+            context = json.loads((session / "context.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(context, dict)
+            and context.get("status") == "active"
+            and contract_digest_is_valid(context)
+        ):
+            peers.append(session)
+    return peers
+
+
+def purge_closed_discard_sessions(workspace: Path) -> None:
+    sessions_root = workspace / PROCESS_RELATIVE / "sessions"
+    if not sessions_root.is_dir() or sessions_root.is_symlink():
+        return
+    for session in list(sessions_root.iterdir()):
+        if not session.is_dir() or session.is_symlink():
+            continue
+        try:
+            context = json.loads((session / "context.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(context, dict)
+            and context.get("status") == "closed"
+            and context.get("retention") == "discard"
+            and contract_digest_is_valid(context)
+        ):
+            shutil.rmtree(session)
 
 
 def create_session(
