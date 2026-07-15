@@ -971,7 +971,7 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             self.assertIn("git.task_ref.branch", codes)
             self.assertIn("git.task_ref.commit", codes)
 
-    def test_session_commit_body_rejects_paperclip_trailer(self) -> None:
+    def test_session_commit_body_allows_required_paperclip_trailer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             initialize_repository(workspace)
@@ -987,8 +987,107 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
                 "-m", "Co-Authored-By: Paperclip <noreply@paperclip.ing>",
             )
             report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            self.assertEqual("allow", report["decision"])
+            self.assertNotIn("git.paperclip_context.commit", {item["code"] for item in report["findings"]})
+
+    def test_session_commit_body_rejects_nonstandard_paperclip_trailer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = self.make_session(workspace)
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-timeout.md").write_text("# Timeout policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-timeout.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "document timeout policy",
+                "-m", "Reviewed-By: Paperclip <noreply@paperclip.ing>",
+            )
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
             self.assertEqual("block", report["decision"])
             self.assertIn("git.paperclip_context.commit", {item["code"] for item in report["findings"]})
+
+    def test_session_commit_body_rejects_near_match_paperclip_trailer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = self.make_session(workspace)
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-timeout.md").write_text("# Timeout policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-timeout.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "document timeout policy",
+                "-m", "Co-Authored-By: Paperclip <other@paperclip.ing>",
+            )
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("git.paperclip_context.commit", {item["code"] for item in report["findings"]})
+
+    def test_session_commit_body_rejects_extra_paperclip_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = self.make_session(workspace)
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-timeout.md").write_text("# Timeout policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-timeout.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "document timeout policy",
+                "-m", "Paperclip metadata",
+                "-m", "Co-Authored-By: Paperclip <noreply@paperclip.ing>",
+            )
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("git.paperclip_context.commit", {item["code"] for item in report["findings"]})
+
+    def test_session_commit_body_rejects_paperclip_execution_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = self.make_session(workspace)
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-timeout.md").write_text("# Timeout policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-timeout.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "document timeout policy",
+                "-m", "Paperclip task execution details",
+                "-m", "Co-Authored-By: Paperclip <noreply@paperclip.ing>",
+            )
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("git.paperclip_context.commit", {item["code"] for item in report["findings"]})
+
+    def test_session_commit_body_rejects_task_agent_and_run_context(self) -> None:
+        for context in ("Paperclip task execution", "Paperclip agent execution", "Paperclip run execution"):
+            with self.subTest(context=context), tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                initialize_repository(workspace)
+                session = self.make_session(workspace)
+                (workspace / "docs").mkdir()
+                (workspace / "docs/payment-timeout.md").write_text("# Timeout policy\n", encoding="utf-8")
+                git(workspace, "add", "docs/payment-timeout.md")
+                git(
+                    workspace,
+                    "-c", "user.name=Test",
+                    "-c", "user.email=test@example.com",
+                    "commit", "-q", "-m", "document timeout policy",
+                    "-m", context,
+                    "-m", "Co-Authored-By: Paperclip <noreply@paperclip.ing>",
+                )
+                report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+                self.assertEqual("block", report["decision"])
+                self.assertIn("git.paperclip_context.commit", {item["code"] for item in report["findings"]})
 
     def test_session_managed_gitignore_can_be_committed_without_expanding_scope(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
