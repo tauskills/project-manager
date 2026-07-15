@@ -66,6 +66,7 @@ REQUIRED_SESSION_FILES = {"context.json", "todo.md", "handoff.md", "evidence.md"
 OPTIONAL_SESSION_FILES = {"delivery.json"}
 ALLOWED_SESSION_DIRS = {"notes", "screens", "logs", "scratch"}
 ALLOWED_PROCESS_ROOT_DIRECTORIES = {"sessions", "checkouts"}
+ALLOWED_PROCESS_ROOT_FILES = {".lifecycle.lock"}
 FORBIDDEN_CONTEXT_KEYS = {
     "authorization", "cookie", "password", "prompt", "prompt_text", "secret", "task_name", "task_title", "token",
 }
@@ -330,7 +331,9 @@ def check_process_area(
     sessions_root = process_root / "sessions"
     checkouts_root = process_root / "checkouts"
     for child in sorted(process_root.iterdir()):
-        if child.name not in ALLOWED_PROCESS_ROOT_DIRECTORIES:
+        allowed_directory = child.name in ALLOWED_PROCESS_ROOT_DIRECTORIES and child.is_dir() and not child.is_symlink()
+        allowed_file = child.name in ALLOWED_PROCESS_ROOT_FILES and child.is_file() and not child.is_symlink()
+        if not allowed_directory and not allowed_file:
             findings.append(finding("revise", "process.root_entry", relative_path(workspace, child), "Only the sessions and runtime checkouts directories are allowed at the process root.", "Move the artifact into the active session or delete it."))
     if checkouts_root.exists() and (checkouts_root.is_symlink() or not checkouts_root.is_dir()):
         findings.append(finding("block", "process.checkouts_invalid", relative_path(workspace, checkouts_root), "The runtime checkouts path must be a local directory.", "Remove the invalid path and let the execution harness recreate the checkout directory."))
