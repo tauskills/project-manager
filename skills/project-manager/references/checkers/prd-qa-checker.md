@@ -20,7 +20,7 @@ It does not answer:
 
 Recommended inputs:
 
-- PRD Markdown path, canonical location `docs/product/{feature-slug}.md`
+- PRD Markdown path, canonical location `docs/product/{feature-slug}/`
 - optional issue identifier
 - optional milestone / release identifier
 

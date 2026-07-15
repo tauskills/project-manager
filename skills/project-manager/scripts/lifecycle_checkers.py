@@ -7,6 +7,11 @@ from pathlib import Path
 
 import yaml
 
+try:
+    from .document_bundle import read_document
+except ImportError:  # Support direct execution from the skill directory.
+    from document_bundle import read_document
+
 
 PLACEHOLDERS = {"", "-", "待补充", "todo", "tbd", "n/a"}
 
@@ -129,8 +134,8 @@ def section(markdown: str, heading: str) -> str:
 
 def analyze_test_report(path: Path) -> dict:
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+        text = read_document(path)
+    except (OSError, ValueError) as exc:
         return report([finding("high", "test-report.missing", "测试报告不可读", str(exc), "补齐测试报告文件。")], [])
     findings, passes = [], []
     required = ["基本信息", "执行摘要", "缺陷与阻塞", "回归与 smoke", "测试结论"]
@@ -149,8 +154,8 @@ def analyze_test_report(path: Path) -> dict:
 
 def analyze_retrospective(path: Path) -> dict:
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+        text = read_document(path)
+    except (OSError, ValueError) as exc:
         return report([finding("high", "retro.missing", "复盘文档不可读", str(exc), "补齐复盘文档。")], [])
     findings, passes = [], []
     required = ["2. 目标与结果回顾", "3. 时间线", "5. 问题与根因", "7. 改进动作", "8. 后续结论"]

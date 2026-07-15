@@ -312,13 +312,49 @@ class ProjectStructureGovernanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             bootstrap(workspace, "generic")
-            (workspace / "docs/product/Not A Slug.md").write_text("# 中文\n", encoding="utf-8")
-            (workspace / "docs/product/payment.md").write_text("# Payment\n", encoding="utf-8")
+            (workspace / "docs/product/Not A Slug").mkdir()
+            (workspace / "docs/product/Not A Slug/001-overview.md").write_text("# 中文\n", encoding="utf-8")
+            (workspace / "docs/product/payment").mkdir()
+            (workspace / "docs/product/payment/001-overview.md").write_text("# Payment\n", encoding="utf-8")
             report = analyze(workspace)
             self.assertEqual(
                 {"document.noncanonical", "document.language_baseline"},
                 {item["code"] for item in report["findings"]},
             )
+
+    def test_checker_allows_numbered_document_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            bootstrap(workspace, "generic")
+            bundle = workspace / "docs/product/payment"
+            bundle.mkdir()
+            (bundle / "001-overview.md").write_text("# 支付功能总览\n\n## 章节目录\n\n- [背景](002-background.md)\n", encoding="utf-8")
+            (bundle / "002-background.md").write_text("## 背景\n\n支付需求。\n", encoding="utf-8")
+            report = analyze(workspace)
+            self.assertEqual("allow", report["decision"])
+            self.assertIn("文档包编号有效：docs/product/payment", report["passes"])
+
+    def test_checker_blocks_missing_overview_and_invalid_chapter_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            bootstrap(workspace, "generic")
+            bundle = workspace / "docs/product/payment"
+            bundle.mkdir()
+            (bundle / "1-background.md").write_text("# 背景\n", encoding="utf-8")
+            report = analyze(workspace)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("document.chapter_name", codes)
+
+    def test_checker_reports_non_contiguous_chapter_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            bootstrap(workspace, "generic")
+            bundle = workspace / "docs/product/payment"
+            bundle.mkdir()
+            (bundle / "001-overview.md").write_text("# 总览\n", encoding="utf-8")
+            (bundle / "003-scope.md").write_text("# 范围\n", encoding="utf-8")
+            report = analyze(workspace)
+            self.assertIn("document.chapter_sequence", {item["code"] for item in report["findings"]})
 
     def test_checker_blocks_without_manifest_and_overview(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -330,8 +366,8 @@ class ProjectStructureGovernanceTests(unittest.TestCase):
             )
 
     def test_pattern_compiler_uses_layout_placeholders(self) -> None:
-        regex = pattern_to_regex("docs/release/{date}-{issue-key}-{slug}.md")
-        self.assertIsNotNone(regex.fullmatch("docs/release/2026-07-13-TAU-123-fix-login.md"))
+        regex = pattern_to_regex("docs/release/{date}-{issue-key}-{slug}/{chapter}.md")
+        self.assertIsNotNone(regex.fullmatch("docs/release/2026-07-13-TAU-123-fix-login/001-overview.md"))
         with self.assertRaises(ValueError):
             pattern_to_regex("docs/{unknown}.md")
 

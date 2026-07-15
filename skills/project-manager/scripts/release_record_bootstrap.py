@@ -3,8 +3,14 @@ import argparse
 import re
 from pathlib import Path
 
+try:
+    from .document_bundle import write_bundle
+except ImportError:  # Support direct execution from the skill directory.
+    from document_bundle import write_bundle
+
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "references/templates/release-record-template.md"
+RELEASE_CHAPTERS = ["basic-info", "release-scope", "pre-release-gates", "configuration-differences", "dependencies", "release-steps", "rollback-steps", "monitoring", "smoke-check", "release-result", "retrospective"]
 
 
 def normalize_segment(value: str, label: str) -> str:
@@ -17,14 +23,22 @@ def normalize_segment(value: str, label: str) -> str:
 def bootstrap_release(workspace: Path, date: str, issue: str, slug: str) -> tuple[Path, str]:
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
         raise ValueError("date must use YYYY-MM-DD")
-    issue_segment = normalize_segment(issue, "issue")
+    raw_issue = issue.strip()
+    if raw_issue.lower() == "no-issue":
+        canonical_issue = "no-issue"
+    elif re.fullmatch(r"[A-Za-z][A-Za-z0-9]+-\d+", raw_issue):
+        canonical_issue = raw_issue.upper()
+    else:
+        raise ValueError("issue must use an uppercase key and number, for example TAU-123, or no-issue")
     slug_segment = normalize_segment(slug, "slug")
-    target = workspace / f"docs/release/{date}-{issue_segment}-{slug_segment}.md"
+    target = workspace / f"docs/release/{date}-{canonical_issue}-{slug_segment}"
+    legacy_target = target.with_suffix(".md")
+    if legacy_target.exists():
+        raise ValueError(f"legacy flat release record exists: {legacy_target}; migrate it to the numbered release bundle first")
     if target.exists():
         return target, "skipped"
     content = TEMPLATE.read_text(encoding="utf-8").replace("{date}", date).replace("{issue-key}", issue)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    write_bundle(target, content, RELEASE_CHAPTERS)
     return target, "written"
 
 

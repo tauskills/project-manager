@@ -6,6 +6,8 @@
 
 文档组织原则默认按功能聚合，而不是按每个 issue 或每次小需求重复拆分。若新增需求只是既有功能的增强、优化、修复或范围补充，应直接更新该功能对应的既有文档，并追加更新记录，不再为同一功能平行创建第二份 PRD、UI、技术文档、测试文档或 schema 文档。
 
+每类功能文档采用总分式目录：`001-overview.md` 是总览与章节目录，后续章节使用连续三位编号并保持一章一文件。UI 的页面、流程、状态和资源使用专用子目录；测试用例与测试报告使用独立子文档包。完整结构以 `$project-structure-governance` 的 `document-bundle-standard.md` 为准。
+
 项目管理判断依据：
 
 - 关键路径：需求文档 -> UI 设计稿 -> 架构与技术设计 -> OpenAPI/schema -> 开发 -> 测试用例/验证 -> 发布。
@@ -52,15 +54,15 @@ flowchart TD
 
 | 阶段 | Owner | 必备产物 | 固定路径 | 交接对象 |
 | --- | --- | --- | --- | --- |
-| 需求设计 | 产品设计师 | PRD/需求文档 | `docs/product/{feature-slug}.md` | UI设计师、架构师、测试 |
-| UI 设计 | UI设计师 | UI 设计交接文档、本地设计源文件、页面截图、导出资源 | `docs/design/{feature-slug}.md`, `docs/design/{feature-slug}.fig`, `docs/design/{feature-slug}/` | 前端、测试 |
-| 架构与技术设计 | 架构师 | 架构与技术设计文档、OpenAPI、数据库 schema | `docs/development/{feature-slug}.md`, `docs/development/openapi/openapi.yaml`, `docs/development/schema/{feature-slug}.sql` | 前端、后端、测试 |
-| 后端开发 | 后端工程师 | 接口实现、迁移、单元/集成验证记录 | 代码仓库对应模块；验证记录写 issue 评论或 `docs/development/{feature-slug}-backend-notes.md` | 前端、测试 |
-| 前端开发 | 前端工程师 | UI/交互实现、接口对接、前端验证记录 | 代码仓库对应模块；验证记录写 issue 评论或 `docs/development/{feature-slug}-frontend-notes.md` | 测试 |
-| 测试设计 | APP测试工程师/Web测试工程师 | 测试用例、验收范围、回归范围 | `docs/testing/{feature-slug}-test-cases.md` | 开发、项目管理 |
-| 测试执行 | APP测试工程师/Web测试工程师 | 测试报告、缺陷清单、回归结论 | `docs/testing/{feature-slug}-test-report.md` | 项目管理、CEO/CTO |
-| 发布 | DevOps/CTO | 发布记录、回滚方案、监控和冒烟结果 | `docs/release/{date}-{issue-key}-{slug}.md` | CEO、项目管理 |
-| 复盘 | 项目管理工程师 | 节点复盘、风险处理结论 | `docs/retrospective/{feature-slug}-retro.md` | CEO、相关 owner |
+| 需求设计 | 产品设计师 | PRD/需求文档 | `docs/product/{feature-slug}/` | UI设计师、架构师、测试 |
+| UI 设计 | UI设计师 | UI 设计交接文档、本地设计源文件、页面截图、导出资源 | `docs/design/{feature-slug}/`, `docs/design/{feature-slug}/assets/design-source.fig`, `docs/design/{feature-slug}/` | 前端、测试 |
+| 架构与技术设计 | 架构师 | 架构与技术设计文档、OpenAPI、数据库 schema | `docs/development/{feature-slug}/`, `docs/development/{feature-slug}/openapi/001-openapi.yaml`, `docs/development/{feature-slug}/schema/001-schema.sql` | 前端、后端、测试 |
+| 后端开发 | 后端工程师 | 接口实现、迁移、单元/集成验证记录 | 代码仓库对应模块；验证记录写 issue 评论或 `docs/development/{feature-slug}/notes/` | 前端、测试 |
+| 前端开发 | 前端工程师 | UI/交互实现、接口对接、前端验证记录 | 代码仓库对应模块；验证记录写 issue 评论或 `docs/development/{feature-slug}/notes/` | 测试 |
+| 测试设计 | APP测试工程师/Web测试工程师 | 测试用例、验收范围、回归范围 | `docs/testing/{feature-slug}/test-cases/` | 开发、项目管理 |
+| 测试执行 | APP测试工程师/Web测试工程师 | 测试报告、缺陷清单、回归结论 | `docs/testing/{feature-slug}/test-report/` | 项目管理、CEO/CTO |
+| 发布 | DevOps/CTO | 发布记录、回滚方案、监控和冒烟结果 | `docs/release/{date}-{issue-key}-{slug}/` | CEO、项目管理 |
+| 复盘 | 项目管理工程师 | 节点复盘、风险处理结论 | `docs/retrospective/{feature-slug}/` | CEO、相关 owner |
 
 文档命名规则：
 
@@ -71,7 +73,7 @@ flowchart TD
 
 UI 设计资产命名规则：
 
-- 设计源文件：`docs/design/{feature-slug}.fig`
+- 设计源文件：`docs/design/{feature-slug}/assets/design-source.fig`
 - 页面截图目录：`docs/design/{feature-slug}/screens/`
 - 导出资源目录：`docs/design/{feature-slug}/exports/`
 - 图标与位图资源目录：`docs/design/{feature-slug}/assets/`
@@ -101,9 +103,9 @@ PRD 推荐直接使用模板：
 
 - 覆盖 PRD 主流程、空态、错误态、加载态、权限态。
 - 标明关键组件、布局约束、响应式/端差异。
-- 本地设计源文件必须落盘，例如 `docs/design/{feature-slug}.fig`；若使用其他设计源格式，也必须以本地文件形式保存。
-- 页面截图必须按功能目录保存到 `docs/design/{feature-slug}/`，必要时可细分 `screens/`、`assets/`、`exports/` 子目录。
-- UI 交接文档 `docs/design/{feature-slug}.md` 中必须包含截图索引，明确页面名称、状态和对应截图文件。
+- 本地设计源文件必须落盘，例如 `docs/design/{feature-slug}/assets/design-source.fig`；若使用其他设计源格式，也必须以本地文件形式保存。
+- 页面截图必须保存到 `docs/design/{feature-slug}/screens/`，页面说明、流程、状态、源文件和导出资源分别放入对应子目录。
+- UI 交接文档 `docs/design/{feature-slug}/` 中必须包含截图索引，明确页面名称、状态和对应截图文件。
 - 在线 Figma 链接可以作为补充，但不能替代本地设计源文件和本地截图资产。
 - 页面截图、导出资源和标注图必须遵循统一命名规则，避免同一功能目录下文件命名随意变化。
 - 可用 `ui-design-checker` 生成报告，输出到 `docs/review/ui-design/{ui-file-stem}.ui-design.generated.md`。
@@ -120,7 +122,7 @@ UI 设计推荐直接使用模板：
 - 架构与技术设计文档明确技术选型，包括使用的语言、框架、数据库、中间件，以及是否复用现有服务。
 - 架构与技术设计文档明确实现归属，包括技术 owner、前端 owner、后端 owner、测试 owner、发布 owner。
 - 架构与技术设计文档明确实现策略，包括接口由哪个服务提供、数据落库位置、事务/幂等/权限/异常处理方案。
-- OpenAPI 明确路径、方法、参数、响应、错误码，并以 `docs/development/openapi/openapi.yaml` 作为唯一主文档。
+- OpenAPI 明确路径、方法、参数、响应、错误码，并以 `docs/development/{feature-slug}/openapi/001-openapi.yaml` 作为唯一主文档。
 - 数据库 schema 明确表、字段、索引、迁移和回滚。
 - 可用 `architecture-design-checker` 生成报告，输出到 `docs/review/architecture-design/{design-file-stem}.architecture-design.generated.md`。
 - 架构争议由 CTO/架构师裁决，项目管理工程师不替代裁决。
@@ -133,11 +135,11 @@ UI 设计推荐直接使用模板：
 - 前端按 PRD、OpenAPI、UI 设计稿开发，不自行扩展需求范围。
 - 前端按架构与技术设计文档约定的交互边界和依赖方式对接，不自行重定义接口语义或状态流转。
 - 任一端发现文档缺口，必须评论标记 owner 和所需动作；缺口影响承诺时标 blocked。
-- 接口变更必须先更新 `docs/development/openapi/openapi.yaml` 和相关 schema，再进入实现。
+- 接口变更必须先更新 `docs/development/{feature-slug}/openapi/001-openapi.yaml` 和相关 schema，再进入实现。
 
 ## Architecture And Technical Design Document Minimum
 
-每个功能在首次进入开发前，必须先补齐 `docs/development/{feature-slug}.md`；后续针对该功能的增强需求继续在原文档上迭代，至少包含：
+每个功能在首次进入开发前，必须先补齐 `docs/development/{feature-slug}/`；后续针对该功能的增强需求继续在原文档上迭代，至少包含：
 
 - 基本信息：需求名称、issue key、作者、日期、关联 PRD/UI/OpenAPI/schema 路径。
 - 背景与目标：问题背景、本次目标、明确不做的范围。
@@ -183,7 +185,7 @@ UI 设计推荐直接使用模板：
 
 进入关闭或归档前，复盘产物必须满足：
 
-- 复盘文档已归档到 `docs/retrospective/{feature-slug}-retro.md`。
+- 复盘文档已归档到 `docs/retrospective/{feature-slug}/`。
 - 已记录目标与结果回顾、关键时间线、问题与根因、改进动作。
 - 若复盘结论影响 PRD、UI、技术文档、测试资产或流程规范，必须在对应主文档追加更新记录。
 
@@ -204,7 +206,7 @@ UI 设计推荐直接使用模板：
 
 ```markdown
 状态：in_progress
-已完成：补齐 PRD，路径 `docs/product/wallet.md`。
+已完成：补齐 PRD 文档包，路径 `docs/product/wallet/`。
 下一步：@UI设计师 基于 PRD 出 UI 设计稿，截止 2026-07-12 18:00。
 依据：关键路径/依赖管理。UI 设计稿是前端和测试的前置依赖。
 风险：支付异常流程仍缺错误码 owner，@架构师 需在技术方案中补齐。

@@ -9,8 +9,11 @@
   },
   "artifact_placeholders": {
     "{feature-slug}": "[a-z0-9]+(?:-[a-z0-9]+)*",
+    "{chapter}": "\\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*",
     "{source-ext}": "(?:fig|sketch|xd|penpot|drawio)",
     "{screens|assets|exports}": "(?:screens|assets|exports)",
+    "{pages|flows|states}": "(?:pages|flows|states)",
+    "{test-cases|test-report}": "(?:test-cases|test-report)",
     "{yaml|json}": "(?:yaml|json)",
     "{date}": "\\d{4}-\\d{2}-\\d{2}",
     "{issue-key}": "(?:[A-Z][A-Z0-9]+-\\d+|no-issue)",
@@ -57,22 +60,24 @@
   "gitignore_patterns": [".env", ".env.*", "!.env.example", "!.env.*.example", ".run/", "dist/", "build/", "coverage/", "__pycache__/", "*.py[cod]", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "node_modules/", "target/"],
   "required_files": [".project-structure.json", "docs/project/project-overview.md"],
   "document_directories": [
-    "docs/project", "docs/product", "docs/design", "docs/development", "docs/development/openapi", "docs/development/schema", "docs/testing", "docs/retrospective", "docs/release", "docs/review"
+    "docs/project", "docs/product", "docs/design", "docs/development", "docs/testing", "docs/retrospective", "docs/release", "docs/review"
   ],
+  "document_bundle_roots": ["docs/product", "docs/design", "docs/development", "docs/testing", "docs/retrospective", "docs/release"],
   "document_artifacts": [
     {"name": "项目说明", "pattern": "docs/project/project-overview.md", "owner": "project"},
     {"name": "项目状态", "pattern": "docs/project/project-status.yaml", "owner": "project"},
-    {"name": "产品文档", "pattern": "docs/product/{feature-slug}.md", "owner": "product"},
-    {"name": "UI 交接文档", "pattern": "docs/design/{feature-slug}.md", "owner": "design"},
-    {"name": "UI 设计源文件", "pattern": "docs/design/{feature-slug}.{source-ext}", "owner": "design"},
-    {"name": "UI 截图与资源", "pattern": "docs/design/{feature-slug}/{screens|assets|exports}/**", "owner": "design"},
-    {"name": "架构与技术设计", "pattern": "docs/development/{feature-slug}.md", "owner": "architecture"},
-    {"name": "OpenAPI 主文档", "pattern": "docs/development/openapi/openapi.{yaml|json}", "owner": "architecture"},
-    {"name": "数据库 Schema", "pattern": "docs/development/schema/{feature-slug}.sql", "owner": "architecture"},
-    {"name": "测试用例", "pattern": "docs/testing/{feature-slug}-test-cases.md", "owner": "testing"},
-    {"name": "测试报告", "pattern": "docs/testing/{feature-slug}-test-report.md", "owner": "testing"},
-    {"name": "发布记录", "pattern": "docs/release/{date}-{issue-key}-{slug}.md", "owner": "release"},
-    {"name": "复盘记录", "pattern": "docs/retrospective/{feature-slug}-retro.md", "owner": "project"},
+    {"name": "产品文档章节", "pattern": "docs/product/{feature-slug}/{chapter}.md", "owner": "product"},
+    {"name": "UI 交接章节", "pattern": "docs/design/{feature-slug}/{chapter}.md", "owner": "design"},
+    {"name": "UI 页面、流程与状态章节", "pattern": "docs/design/{feature-slug}/{pages|flows|states}/{chapter}.md", "owner": "design"},
+    {"name": "UI 设计源文件与资源", "pattern": "docs/design/{feature-slug}/{screens|assets|exports}/**", "owner": "design"},
+    {"name": "架构与技术设计章节", "pattern": "docs/development/{feature-slug}/{chapter}.md", "owner": "architecture"},
+    {"name": "开发过程记录", "pattern": "docs/development/{feature-slug}/notes/{chapter}.md", "owner": "engineering"},
+    {"name": "OpenAPI 文档", "pattern": "docs/development/{feature-slug}/openapi/001-openapi.{yaml|json}", "owner": "architecture"},
+    {"name": "数据库 Schema", "pattern": "docs/development/{feature-slug}/schema/001-schema.sql", "owner": "architecture"},
+    {"name": "测试功能总览", "pattern": "docs/testing/{feature-slug}/{chapter}.md", "owner": "testing"},
+    {"name": "测试用例与报告章节", "pattern": "docs/testing/{feature-slug}/{test-cases|test-report}/{chapter}.md", "owner": "testing"},
+    {"name": "发布记录章节", "pattern": "docs/release/{date}-{issue-key}-{slug}/{chapter}.md", "owner": "release"},
+    {"name": "复盘章节", "pattern": "docs/retrospective/{feature-slug}/{chapter}.md", "owner": "project"},
     {"name": "生成的检查报告", "pattern": "docs/review/{module}/**", "owner": "governance"}
   ]
 }

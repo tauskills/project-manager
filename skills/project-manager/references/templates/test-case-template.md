@@ -1,7 +1,7 @@
 # 测试用例模板
 
 > 适用场景：每个功能在进入联调和测试执行前，测试负责人必须先补齐本模板对应文档；后续增强需求继续在原文档上更新。  
-> 固定路径：`docs/testing/{feature-slug}-test-cases.md`
+> 固定路径：`docs/testing/{feature-slug}/test-cases/`
 
 ## 0. 更新记录
 
@@ -20,10 +20,10 @@
 
 关联文档：
 
-- PRD：`docs/product/{feature-slug}.md`
-- UI 设计：`docs/design/{feature-slug}.md`
-- 架构与技术设计：`docs/development/{feature-slug}.md`
-- OpenAPI：`docs/development/openapi/openapi.yaml`
+- PRD：`docs/product/{feature-slug}/`
+- UI 设计：`docs/design/{feature-slug}/`
+- 架构与技术设计：`docs/development/{feature-slug}/`
+- OpenAPI：`docs/development/{feature-slug}/openapi/001-openapi.yaml`
 
 ## 2. 测试范围
 

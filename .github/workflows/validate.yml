@@ -13,6 +13,7 @@ jobs:
         skill:
           - skills/project-manager
           - skills/project-structure-governance
+          - skills/isolate-paperclip-work
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

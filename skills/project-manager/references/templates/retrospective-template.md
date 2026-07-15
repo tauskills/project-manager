@@ -1,7 +1,7 @@
 # 复盘模板
 
 > 适用场景：每个功能在完成发布并进入复盘阶段后，项目管理负责人必须先补齐本模板对应文档；后续同一功能的后续迭代可继续在原文档上追加复盘记录。  
-> 固定路径：`docs/retrospective/{feature-slug}-retro.md`
+> 固定路径：`docs/retrospective/{feature-slug}/`
 
 ## 0. 更新记录
 
@@ -20,11 +20,11 @@
 
 关联文档：
 
-- PRD：`docs/product/{feature-slug}.md`
-- UI 设计：`docs/design/{feature-slug}.md`
-- 架构与技术设计：`docs/development/{feature-slug}.md`
-- 测试报告：`docs/testing/{feature-slug}-test-report.md`
-- 发布记录：`docs/release/{date}-{issue-key}-{slug}.md`
+- PRD：`docs/product/{feature-slug}/`
+- UI 设计：`docs/design/{feature-slug}/`
+- 架构与技术设计：`docs/development/{feature-slug}/`
+- 测试报告：`docs/testing/{feature-slug}/test-report/`
+- 发布记录：`docs/release/{date}-{issue-key}-{slug}/`
 
 ## 2. 目标与结果回顾
 

@@ -27,6 +27,7 @@ except ImportError:  # Support direct execution from the skill directory.
 
 CHINESE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+NUMBERED_MARKDOWN_RE = re.compile(r"^(\d{3})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 
 
 def pattern_to_regex(pattern: str, placeholders: dict[str, str] | None = None) -> re.Pattern[str]:
@@ -93,6 +94,61 @@ def load_manifest(workspace: Path, layout: dict, findings: list[dict]) -> dict |
 
 def matches_any(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+
+def check_document_bundles(workspace: Path, layout: dict, findings: list[dict], passes: list[str]) -> None:
+    for relative_root in layout.get("document_bundle_roots", []):
+        root = workspace / relative_root
+        if not root.is_dir():
+            continue
+        for child in sorted(root.iterdir()):
+            relative = child.relative_to(workspace).as_posix()
+            if child.is_file():
+                findings.append(finding(
+                    "block", "document.bundle_required", relative,
+                    "生命周期文档必须迁入按功能或发布事件组织的总分式目录。", relative_root,
+                ))
+            elif child.is_dir() and not (child / "001-overview.md").is_file():
+                findings.append(finding(
+                    "block", "document.overview_missing", relative,
+                    "功能或发布事件目录必须以 001-overview.md 作为总览入口。",
+                ))
+        for directory in [root, *sorted(item for item in root.rglob("*") if item.is_dir())]:
+            markdown = sorted(item for item in directory.iterdir() if item.is_file() and item.suffix.lower() == ".md")
+            if not markdown:
+                continue
+            directory_relative = directory.relative_to(workspace).as_posix()
+            parsed = [NUMBERED_MARKDOWN_RE.fullmatch(item.name) for item in markdown]
+            invalid = [item.name for item, match in zip(markdown, parsed) if match is None]
+            if invalid:
+                findings.append(finding(
+                    "block", "document.chapter_name", directory_relative,
+                    f"章节文件必须使用三位编号和 kebab-case：{', '.join(invalid)}。",
+                ))
+                continue
+            numbers = [int(match.group(1)) for match in parsed if match]
+            if markdown[0].name != "001-overview.md":
+                findings.append(finding(
+                    "block", "document.overview_missing", directory_relative,
+                    "文档包必须以 001-overview.md 作为总览和目录。",
+                ))
+            catalog_valid = True
+            if len(markdown) > 1 and markdown[0].name == "001-overview.md":
+                overview = markdown[0].read_text(encoding="utf-8", errors="replace")
+                if not re.search(r"^##\s+章节目录\s*$", overview, re.MULTILINE):
+                    catalog_valid = False
+                    findings.append(finding(
+                        "block", "document.catalog_missing", directory_relative,
+                        "多章节文档包的 001-overview.md 必须包含 `## 章节目录`。",
+                    ))
+            expected = list(range(1, len(numbers) + 1))
+            if numbers != expected:
+                findings.append(finding(
+                    "revise", "document.chapter_sequence", directory_relative,
+                    f"章节编号必须从 001 连续递增，当前为：{', '.join(f'{item:03d}' for item in numbers)}。",
+                ))
+            if not invalid and markdown[0].name == "001-overview.md" and numbers == expected and catalog_valid:
+                passes.append(f"文档包编号有效：{directory_relative}")
 
 
 def analyze(workspace: Path) -> dict:
@@ -212,6 +268,7 @@ def analyze(workspace: Path) -> dict:
                 content = path.read_text(encoding="utf-8", errors="replace")
                 if not CHINESE_RE.search(content):
                     findings.append(finding("revise", "document.language_baseline", relative, "项目 Markdown 文档未包含中文内容。"))
+        check_document_bundles(workspace, layout, findings, passes)
 
     overview_path = workspace / "docs/project/project-overview.md"
     if manifest and overview_path.is_file():

@@ -31,6 +31,8 @@
 
 文档组织默认按功能聚合，而不是按每次需求单独拆文档。若新需求只是既有功能的补充、优化或修复，应更新原功能文档，并追加更新记录，而不是再创建一套重复文档。
 
+功能文档采用总分式目录，每个目录以 `001-overview.md` 开始，后续章节使用连续三位编号。设计、开发和测试在功能目录内继续按页面、流程、状态、接口、Schema、用例和报告分层。
+
 ## 文档管理
 
 项目文档目录、命名、中文内容和仓库归档要求由独立的 `$project-structure-governance` skill 统一管理。启动生命周期工作前，先使用该 skill 初始化或检查业务仓库的文档布局；本 skill 只负责各阶段产物的内容质量和门禁。
@@ -41,17 +43,17 @@
 
 ```bash
 python3 scripts/prd_qa_checker.py \
-  --prd docs/product/example.md \
+  --prd docs/product/example/ \
   --issue WAR-342 \
   --output auto
 
 python3 scripts/ui_design_checker.py \
-  --ui docs/design/payment-confirmation.md \
+  --ui docs/design/payment-confirmation/ \
   --issue WAR-342 \
   --output auto
 
 python3 scripts/test_case_checker.py \
-  --testcase docs/testing/payment-confirmation-test-cases.md \
+  --testcase docs/testing/payment-confirmation/test-cases/ \
   --issue WAR-342 \
   --output auto
 
@@ -73,12 +75,12 @@ python3 scripts/feature_doc_bootstrap.py \
   --issue WAR-342
 
 python3 scripts/architecture_design_checker.py \
-  --design docs/development/payment-reconciliation.md \
+  --design docs/development/payment-reconciliation/ \
   --issue WAR-342 \
   --output auto
 
 python3 scripts/release_readiness_checker.py \
-  --release docs/release/example.md \
+  --release docs/release/2026-07-12-WAR-346-payment-release/ \
   --issue WAR-346 \
   --output auto
 

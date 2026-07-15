@@ -20,6 +20,7 @@ Read the target repository's `.project-structure.json` next. It selects one or m
 5. Stop and extend the index when no rule owns the file; do not invent an arbitrary directory.
 
 Read [project-structure-standard.md](references/project-structure-standard.md) when classifying an unfamiliar file, choosing a name, or changing the index.
+Read [document-bundle-standard.md](references/document-bundle-standard.md) before creating or reorganizing PRD, design, development, testing, release, or retrospective artifacts. Require the total-part directory structure and three-digit chapter numbering defined there.
 
 ## Initialize A Repository
 

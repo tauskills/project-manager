@@ -20,7 +20,7 @@ It does not answer:
 
 Recommended inputs:
 
-- UI design Markdown path, canonical location `docs/design/{feature-slug}.md`
+- UI design Markdown path, canonical location `docs/design/{feature-slug}/`
 - optional issue identifier
 
 Recommended durable output path:
@@ -29,7 +29,7 @@ Recommended durable output path:
 
 Expected local assets:
 
-- `docs/design/{feature-slug}.fig`
+- `docs/design/{feature-slug}/assets/design-source.fig`
 - `docs/design/{feature-slug}/screens/`
 - `docs/design/{feature-slug}/assets/`
 - `docs/design/{feature-slug}/exports/`

@@ -8,6 +8,7 @@
 - 将多应用隔离到 `apps/<name>/`，共享代码放入 `packages/`。
 - 自动维护 `docs/project/project-overview.md` 的应用清单。
 - 检查未登记目录、命名错误、敏感文件和结构冲突。
+- 按功能或发布事件检查总分式文档目录和三位章节编号。
 
 ## 快速开始
 
@@ -42,4 +43,5 @@ python3 scripts/project_structure_checker.py \
 
 - [Skill 使用说明](SKILL.md)
 - [项目结构规范](references/project-structure-standard.md)
+- [项目文档总分式目录规范](references/document-bundle-standard.md)
 - [Manifest Schema](references/project-manifest.schema.json)

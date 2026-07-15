@@ -1,7 +1,7 @@
 # 架构与技术设计文档模板
 
 > 适用场景：每个功能在首次进入开发前，架构师必须先补齐本模板对应文档；后续增强需求继续在原文档上更新。  
-> 固定路径：`docs/development/{feature-slug}.md`
+> 固定路径：`docs/development/{feature-slug}/`
 
 ## 1. 基本信息
 
@@ -15,11 +15,11 @@
 
 关联文档：
 
-- PRD：`docs/product/{feature-slug}.md`
-- UI 设计：`docs/design/{feature-slug}.md`
-- OpenAPI：`docs/development/openapi/openapi.yaml`
-- Schema：`docs/development/schema/{feature-slug}.sql`
-- 测试用例：`docs/testing/{feature-slug}-test-cases.md`
+- PRD：`docs/product/{feature-slug}/`
+- UI 设计：`docs/design/{feature-slug}/`
+- OpenAPI：`docs/development/{feature-slug}/openapi/001-openapi.yaml`
+- Schema：`docs/development/{feature-slug}/schema/001-schema.sql`
+- 测试用例：`docs/testing/{feature-slug}/test-cases/`
 
 ## 0. 更新记录
 
@@ -136,7 +136,7 @@
 
 主文档路径：
 
-- `docs/development/openapi/openapi.yaml`
+- `docs/development/{feature-slug}/openapi/001-openapi.yaml`
 
 ### 7.2 Schema 变更摘要
 
@@ -147,7 +147,7 @@
 
 主文件路径：
 
-- `docs/development/schema/{feature-slug}.sql`
+- `docs/development/{feature-slug}/schema/001-schema.sql`
 
 ## 8. 角色分工
 

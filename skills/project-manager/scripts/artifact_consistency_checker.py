@@ -5,6 +5,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from .document_bundle import document_slug, read_document
+except ImportError:  # Support direct execution from the skill directory.
+    from document_bundle import document_slug, read_document
+
 
 PLACEHOLDER_VALUES = {"", "-", "—", "/", "待补充", "todo", "tbd", "n/a"}
 STAGES = ("intake", "design", "development", "qa", "release", "closure")
@@ -29,7 +34,7 @@ def is_placeholder(value: str) -> bool:
 
 
 def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return read_document(path)
 
 
 def extract_bullet_value(section_body: str, label: str) -> str:
@@ -63,7 +68,7 @@ def derive_output_path(feature_doc: Path) -> Path:
     docs_root = find_docs_root(feature_doc)
     if docs_root is None:
         raise ValueError("`--output auto` requires the feature doc to live under a `docs/` directory.")
-    return docs_root / "review" / "artifact-consistency" / f"{feature_doc.stem}.artifact-consistency.generated.md"
+    return docs_root / "review" / "artifact-consistency" / f"{document_slug(feature_doc)}.artifact-consistency.generated.md"
 
 
 def extract_paths(markdown: str) -> list[str]:
@@ -85,16 +90,16 @@ def analyze_feature(workspace: Path, feature_slug: str, stage: str = "developmen
     findings: list[Finding] = []
     passes: list[str] = []
 
-    prd = workspace / f"docs/product/{feature_slug}.md"
-    ui = workspace / f"docs/design/{feature_slug}.md"
-    fig = workspace / f"docs/design/{feature_slug}.fig"
+    prd = workspace / f"docs/product/{feature_slug}"
+    ui = workspace / f"docs/design/{feature_slug}"
+    fig = workspace / f"docs/design/{feature_slug}/assets/design-source.fig"
     screens = workspace / f"docs/design/{feature_slug}/screens"
-    dev = workspace / f"docs/development/{feature_slug}.md"
-    schema = workspace / f"docs/development/schema/{feature_slug}.sql"
-    openapi = workspace / "docs/development/openapi/openapi.yaml"
-    testcase = workspace / f"docs/testing/{feature_slug}-test-cases.md"
-    testreport = workspace / f"docs/testing/{feature_slug}-test-report.md"
-    retro = workspace / f"docs/retrospective/{feature_slug}-retro.md"
+    dev = workspace / f"docs/development/{feature_slug}"
+    schema = workspace / f"docs/development/{feature_slug}/schema/001-schema.sql"
+    openapi = workspace / f"docs/development/{feature_slug}/openapi/001-openapi.yaml"
+    testcase = workspace / f"docs/testing/{feature_slug}/test-cases"
+    testreport = workspace / f"docs/testing/{feature_slug}/test-report"
+    retro = workspace / f"docs/retrospective/{feature_slug}"
 
     required_artifacts = [
         ("PRD", prd, "intake"),
@@ -120,14 +125,24 @@ def analyze_feature(workspace: Path, feature_slug: str, stage: str = "developmen
 
     docs_to_check = [path for path in [prd, ui, dev, testcase, retro] if path.exists()]
     referenced = {
-        "PRD": f"docs/product/{feature_slug}.md",
-        "UI": f"docs/design/{feature_slug}.md",
-        "Development": f"docs/development/{feature_slug}.md",
-        "OpenAPI": "docs/development/openapi/openapi.yaml",
-        "Schema": f"docs/development/schema/{feature_slug}.sql",
-        "Test Cases": f"docs/testing/{feature_slug}-test-cases.md",
-        "Test Report": f"docs/testing/{feature_slug}-test-report.md",
-        "Retrospective": f"docs/retrospective/{feature_slug}-retro.md",
+        "PRD": f"docs/product/{feature_slug}/",
+        "UI": f"docs/design/{feature_slug}/",
+        "Development": f"docs/development/{feature_slug}/",
+        "OpenAPI": f"docs/development/{feature_slug}/openapi/001-openapi.yaml",
+        "Schema": f"docs/development/{feature_slug}/schema/001-schema.sql",
+        "Test Cases": f"docs/testing/{feature_slug}/test-cases/",
+        "Test Report": f"docs/testing/{feature_slug}/test-report/",
+        "Retrospective": f"docs/retrospective/{feature_slug}/",
+    }
+    referenced_documents = {
+        "PRD": prd, "UI": ui, "Development": dev, "OpenAPI": openapi,
+        "Schema": schema, "Test Cases": testcase, "Test Report": testreport,
+        "Retrospective": retro,
+    }
+    reference_stages = {
+        "PRD": "intake", "UI": "design", "Development": "development",
+        "OpenAPI": "development", "Schema": "development", "Test Cases": "development",
+        "Test Report": "release", "Retrospective": "closure",
     }
 
     for doc in docs_to_check:
@@ -135,7 +150,9 @@ def analyze_feature(workspace: Path, feature_slug: str, stage: str = "developmen
         found_paths = {path for path in extract_paths(content) if not is_template_path(path)}
         doc_label = str(doc.relative_to(workspace))
         for name, rel in referenced.items():
-            if doc.name == Path(rel).name:
+            if doc == referenced_documents[name]:
+                continue
+            if STAGE_ORDER[stage] < STAGE_ORDER[reference_stages[name]]:
                 continue
             if name in {"Test Report", "Retrospective"} and doc != retro:
                 continue
@@ -241,7 +258,7 @@ def main() -> int:
 
     workspace = Path(args.workspace).resolve()
     report = analyze_feature(workspace, args.feature, args.stage)
-    marker = workspace / f"docs/product/{args.feature}.md"
+    marker = workspace / "docs/product" / args.feature
     if args.format == "json":
         rendered = json.dumps({"workspace": str(workspace), "feature": args.feature, "issue": args.issue, **report}, ensure_ascii=False, indent=2)
     else:

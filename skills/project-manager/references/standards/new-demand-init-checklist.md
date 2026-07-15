@@ -19,19 +19,26 @@
 
 若确认是新功能，再按固定命名创建以下文件：
 
-- `docs/product/{feature-slug}.md`
-- `docs/design/{feature-slug}.md`
-- `docs/design/{feature-slug}.fig`
+- `docs/product/{feature-slug}/`
+- `docs/design/{feature-slug}/`
+- `docs/design/{feature-slug}/assets/design-source.fig`
 - `docs/design/{feature-slug}/`
 - `docs/design/{feature-slug}/screens/`
 - `docs/design/{feature-slug}/assets/`
 - `docs/design/{feature-slug}/exports/`
-- `docs/development/{feature-slug}.md`
-- `docs/development/openapi/openapi.yaml`
-- `docs/development/schema/{feature-slug}.sql`
-- `docs/testing/{feature-slug}-test-cases.md`
-- `docs/release/{date}-{issue-key}-{slug}.md`
-- `docs/retrospective/{feature-slug}-retro.md`
+- `docs/design/{feature-slug}/pages/`
+- `docs/design/{feature-slug}/flows/`
+- `docs/design/{feature-slug}/states/`
+- `docs/development/{feature-slug}/`
+- `docs/development/{feature-slug}/openapi/001-openapi.yaml`
+- `docs/development/{feature-slug}/schema/001-schema.sql`
+- `docs/development/{feature-slug}/notes/`
+- `docs/testing/{feature-slug}/test-cases/`
+- `docs/testing/{feature-slug}/test-report/`
+- `docs/release/{date}-{issue-key}-{slug}/`
+- `docs/retrospective/{feature-slug}/`
+
+上述文档目录必须以 `001-overview.md` 开始。每个二级章节拆为独立文件，按 `002-...md`、`003-...md` 连续编号；多章节目录的总览必须包含 `## 章节目录` 和相对链接。
 
 ## 3. 角色交接初始化
 
@@ -52,7 +59,7 @@
 
 1. `$project-structure-governance` 检查未返回 `block`，本次需求的文档路径违规项已处理
 2. PRD 已更新到功能主文档并通过 `prd-qa-checker`
-3. UI 设计已按模板更新到功能主文档，本地设计源文件已保存为 `docs/design/{feature-slug}.fig`，且页面截图已保存到 `docs/design/{feature-slug}/`
+3. UI 设计已按模板更新到功能文档包，本地设计源文件已保存为 `docs/design/{feature-slug}/assets/design-source.fig`，且页面截图已保存到 `docs/design/{feature-slug}/screens/`
 4. 架构与技术设计文档已在功能主文档中按模板补齐
 5. `openapi.yaml` 更新完成
 6. `schema` 脚本更新完成
@@ -69,22 +76,22 @@ python3 scripts/feature_doc_bootstrap.py \
   --issue {issue-key}
 
 python3 scripts/prd_qa_checker.py \
-  --prd docs/product/{feature-slug}.md \
+  --prd docs/product/{feature-slug}/ \
   --issue {issue-key} \
   --output auto
 
 python3 scripts/ui_design_checker.py \
-  --ui docs/design/{feature-slug}.md \
+  --ui docs/design/{feature-slug}/ \
   --issue {issue-key} \
   --output auto
 
 python3 scripts/test_case_checker.py \
-  --testcase docs/testing/{feature-slug}-test-cases.md \
+  --testcase docs/testing/{feature-slug}/test-cases/ \
   --issue {issue-key} \
   --output auto
 
 python3 scripts/architecture_design_checker.py \
-  --design docs/development/{feature-slug}.md \
+  --design docs/development/{feature-slug}/ \
   --issue {issue-key} \
   --output auto
 

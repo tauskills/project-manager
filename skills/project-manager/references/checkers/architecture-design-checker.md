@@ -20,7 +20,7 @@ It does not answer:
 
 Recommended inputs:
 
-- architecture and technical design Markdown path, canonical location `docs/development/*.md`
+- architecture and technical design bundle, canonical location `docs/development/{feature-slug}/`
 - optional issue identifier
 
 Recommended durable output path:

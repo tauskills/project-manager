@@ -1,6 +1,6 @@
 # 发布记录
 
-> 固定路径：`docs/release/{date}-{issue-key}-{slug}.md`
+> 固定路径：`docs/release/{date}-{issue-key}-{slug}/`
 
 ## 1. 基本信息
 

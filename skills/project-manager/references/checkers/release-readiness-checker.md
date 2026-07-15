@@ -11,7 +11,7 @@ Check whether a release record is complete enough for release-window review.
 ## Input Contract
 
 - release record Markdown
-- canonical location `docs/release/*.md`
+- canonical location `docs/release/{date}-{issue-key}-{slug}/`
 - version / milestone identifier
 - optional environment list
 

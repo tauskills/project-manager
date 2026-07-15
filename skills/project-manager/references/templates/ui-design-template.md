@@ -1,9 +1,9 @@
 # UI 设计交接模板
 
 > 适用场景：每个功能在首次进入前端实现前，UI 设计师必须先补齐本模板对应文档；后续增强需求继续在原文档上更新。  
-> 固定路径：`docs/design/{feature-slug}.md`  
-> 本地设计源文件：`docs/design/{feature-slug}.fig`  
-> 页面截图目录：`docs/design/{feature-slug}/`
+> 固定路径：`docs/design/{feature-slug}/`
+> 本地设计源文件：`docs/design/{feature-slug}/assets/design-source.fig`
+> 页面截图目录：`docs/design/{feature-slug}/screens/`
 
 命名规则：
 
@@ -30,11 +30,11 @@
 
 关联文档：
 
-- PRD：`docs/product/{feature-slug}.md`
-- 架构与技术设计：`docs/development/{feature-slug}.md`
-- 测试用例：`docs/testing/{feature-slug}-test-cases.md`
-- 本地设计源文件：`docs/design/{feature-slug}.fig`
-- 页面截图目录：`docs/design/{feature-slug}/`
+- PRD：`docs/product/{feature-slug}/`
+- 架构与技术设计：`docs/development/{feature-slug}/`
+- 测试用例：`docs/testing/{feature-slug}/test-cases/`
+- 本地设计源文件：`docs/design/{feature-slug}/assets/design-source.fig`
+- 页面截图目录：`docs/design/{feature-slug}/screens/`
 
 ## 2. 设计目标
 
@@ -79,7 +79,7 @@
 
 ## 8. 视觉资源与设计稿链接
 
-- 本地设计源文件：`docs/design/{feature-slug}.fig`
+- 本地设计源文件：`docs/design/{feature-slug}/assets/design-source.fig`
 - 其他本地源文件：
 - 在线补充链接：
 - 页面截图目录：`docs/design/{feature-slug}/screens/`

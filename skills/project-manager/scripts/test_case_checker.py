@@ -5,6 +5,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from .document_bundle import document_slug, read_document
+except ImportError:  # Support direct execution from the skill directory.
+    from document_bundle import document_slug, read_document
+
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 SUBSECTION_RE = re.compile(r"^###\s+(.+?)\s*$", re.MULTILINE)
@@ -26,7 +31,7 @@ def normalize_text(value: str) -> str:
 
 
 def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return read_document(path)
 
 
 def find_docs_root(path: Path) -> Path | None:
@@ -40,7 +45,7 @@ def derive_output_path(testcase_path: Path) -> Path:
     docs_root = find_docs_root(testcase_path)
     if docs_root is None:
         raise ValueError("`--output auto` requires the test case document to live under a `docs/` directory.")
-    return docs_root / "review" / "test-case" / f"{testcase_path.stem}.test-case.generated.md"
+    return docs_root / "review" / "test-case" / f"{document_slug(testcase_path)}.test-case.generated.md"
 
 
 def split_sections(markdown: str) -> dict[str, str]:
@@ -232,7 +237,7 @@ def render_markdown(report: dict, testcase_path: str, issue: str | None) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run test case checks for template-based Markdown docs.")
-    parser.add_argument("--testcase", required=True, help="Path to test case Markdown file")
+    parser.add_argument("--testcase", required=True, help="Path to a test-case document bundle or legacy Markdown file")
     parser.add_argument("--issue", help="Optional issue identifier")
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     parser.add_argument("--output", help="Optional file path to save rendered report, or `auto` for canonical docs/review output")

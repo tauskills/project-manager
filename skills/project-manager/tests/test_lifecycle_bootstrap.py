@@ -10,7 +10,7 @@ class LifecycleBootstrapTests(unittest.TestCase):
     def test_intake_does_not_require_future_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
-            prd = workspace / "docs/product/payment.md"
+            prd = workspace / "docs/product/payment/001-overview.md"
             prd.parent.mkdir(parents=True)
             prd.write_text("# PRD\n", encoding="utf-8")
             report = analyze_feature(workspace, "payment", "intake")
@@ -25,7 +25,13 @@ class LifecycleBootstrapTests(unittest.TestCase):
             self.assertEqual("written", first)
             self.assertEqual("skipped", second)
             self.assertEqual(target, repeated)
-            self.assertIn("WAR-346", target.read_text(encoding="utf-8"))
+            self.assertTrue((target / "001-overview.md").exists())
+            self.assertIn("WAR-346", "\n".join(path.read_text(encoding="utf-8") for path in target.glob("*.md")))
+
+    def test_release_record_requires_canonical_issue(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(ValueError):
+                bootstrap_release(Path(temp_dir), "2026-07-12", "release", "payment")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,11 @@ import argparse
 import re
 from pathlib import Path
 
+try:
+    from .document_bundle import write_bundle
+except ImportError:  # Support direct execution from the skill directory.
+    from document_bundle import write_bundle
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = REPO_ROOT / "references" / "templates"
@@ -15,27 +20,51 @@ paths: {{}}
 """
 
 TEMPLATE_MAPPINGS = {
-    "prd": ("prd-template.md", "docs/product/{feature_slug}.md"),
-    "ui": ("ui-design-template.md", "docs/design/{feature_slug}.md"),
-    "development": ("architecture-design-template.md", "docs/development/{feature_slug}.md"),
-    "testing": ("test-case-template.md", "docs/testing/{feature_slug}-test-cases.md"),
-    "test-report": ("test-report-template.md", "docs/testing/{feature_slug}-test-report.md"),
-    "retrospective": ("retrospective-template.md", "docs/retrospective/{feature_slug}-retro.md"),
+    "prd": ("prd-template.md", "docs/product/{feature_slug}", ["change-log", "basic-info", "background-and-goals", "users-and-scenarios", "scope", "main-flow", "states-and-errors", "non-functional-requirements", "acceptance-criteria", "dependencies-and-risks", "revision-history"]),
+    "ui": ("ui-design-template.md", "docs/design/{feature_slug}", ["change-log", "basic-info", "design-goals", "pages-and-entry-points", "key-flows", "state-design", "components-and-interactions", "responsive-design", "visual-assets", "screenshot-index", "acceptance-focus", "revision-history"]),
+    "development": ("architecture-design-template.md", "docs/development/{feature_slug}", ["basic-info", "change-log", "background-and-goals", "scope-and-impact", "system-boundaries", "technology-selection", "implementation-strategy", "api-and-schema", "ownership", "risks", "test-release-rollback", "conclusion"]),
+    "testing": ("test-case-template.md", "docs/testing/{feature_slug}/test-cases", ["change-log", "basic-info", "test-scope", "test-focus", "environment-and-data", "test-cases", "regression-and-smoke", "risks-and-blockers", "revision-history"]),
+    "test-report": ("test-report-template.md", "docs/testing/{feature_slug}/test-report", ["basic-info", "execution-summary", "defects-and-blockers", "regression-and-smoke", "test-conclusion"]),
+    "retrospective": ("retrospective-template.md", "docs/retrospective/{feature_slug}", ["change-log", "basic-info", "goals-and-results", "timeline", "what-went-well", "root-causes", "risks-and-exceptions", "improvement-actions", "follow-up", "revision-history"]),
 }
 
 DIRECTORIES = [
-    "docs/design/{feature_slug}",
+    "docs/product/{feature_slug}",
+    "docs/design/{feature_slug}/pages",
+    "docs/design/{feature_slug}/flows",
+    "docs/design/{feature_slug}/states",
     "docs/design/{feature_slug}/screens",
     "docs/design/{feature_slug}/assets",
     "docs/design/{feature_slug}/exports",
+    "docs/development/{feature_slug}/openapi",
+    "docs/development/{feature_slug}/schema",
+    "docs/development/{feature_slug}/notes",
+    "docs/testing/{feature_slug}/test-cases",
+    "docs/testing/{feature_slug}/test-report",
+    "docs/retrospective/{feature_slug}",
 ]
 
 EXTRA_FILES = {
-    "docs/design/{feature_slug}.fig": "",
-    "docs/development/openapi/openapi.yaml": OPENAPI_STUB,
-    "docs/development/schema/{feature_slug}.sql": "-- schema stub for {feature_slug}\n",
+    "docs/design/{feature_slug}/pages/001-overview.md": "# 页面设计目录\n\n- 功能：`{feature-slug}`\n- 页面清单：待补充\n",
+    "docs/design/{feature_slug}/flows/001-overview.md": "# 交互流程目录\n\n- 功能：`{feature-slug}`\n- 流程清单：待补充\n",
+    "docs/design/{feature_slug}/states/001-overview.md": "# 状态设计目录\n\n- 功能：`{feature-slug}`\n- 状态清单：待补充\n",
+    "docs/design/{feature_slug}/assets/design-source.fig": "",
+    "docs/development/{feature_slug}/openapi/001-openapi.yaml": OPENAPI_STUB,
+    "docs/development/{feature_slug}/schema/001-schema.sql": "-- schema stub for {feature_slug}\n",
+    "docs/development/{feature_slug}/notes/001-overview.md": "# 开发记录目录\n\n- 功能：`{feature-slug}`\n- 前后端实现记录：待补充\n",
+    "docs/testing/{feature_slug}/001-overview.md": "# 测试文档目录\n\n- 功能：`{feature-slug}`\n- 测试用例：`docs/testing/{feature-slug}/test-cases/`\n- 测试报告：`docs/testing/{feature-slug}/test-report/`\n",
     "docs/project/project-status.yaml": (TEMPLATE_DIR / "project-status-template.yaml").read_text(encoding="utf-8"),
 }
+
+LEGACY_PATHS = [
+    "docs/product/{feature_slug}.md",
+    "docs/design/{feature_slug}.md",
+    "docs/design/{feature_slug}.fig",
+    "docs/development/{feature_slug}.md",
+    "docs/testing/{feature_slug}-test-cases.md",
+    "docs/testing/{feature_slug}-test-report.md",
+    "docs/retrospective/{feature_slug}-retro.md",
+]
 
 
 def ensure_ascii_slug(value: str) -> str:
@@ -70,25 +99,28 @@ def load_reference_template(name: str) -> str:
 
 def bootstrap(workspace: Path, feature_slug: str, issue_key: str | None, overwrite: bool) -> list[tuple[str, str]]:
     results: list[tuple[str, str]] = []
+    legacy = [workspace / pattern.format(feature_slug=feature_slug) for pattern in LEGACY_PATHS]
+    existing_legacy = [path for path in legacy if path.exists()]
+    if existing_legacy:
+        paths = ", ".join(str(path.relative_to(workspace)) for path in existing_legacy)
+        raise ValueError(f"检测到旧版扁平文档：{paths}。请先按总分式目录规范拆分并更新引用。")
 
     for directory in DIRECTORIES:
         resolved = workspace / directory.format(feature_slug=feature_slug)
         resolved.mkdir(parents=True, exist_ok=True)
         results.append((str(resolved), "dir"))
 
-    for _, (template_name, target_pattern) in TEMPLATE_MAPPINGS.items():
+    for _, (template_name, target_pattern, chapter_slugs) in TEMPLATE_MAPPINGS.items():
         target = workspace / target_pattern.format(feature_slug=feature_slug)
         template = render_template(load_reference_template(template_name), feature_slug, issue_key)
-        status = write_if_missing(target, template, overwrite)
-        results.append((str(target), status))
+        results.extend(write_bundle(target, template, chapter_slugs, overwrite))
 
     for pattern, raw_content in EXTRA_FILES.items():
         target = workspace / pattern.format(feature_slug=feature_slug)
         content = render_template(raw_content, feature_slug, issue_key)
-        # Project-wide files are shared state, not feature-owned artifacts.
-        protected = {
-            "docs/project/project-status.yaml",
-            "docs/development/openapi/openapi.yaml",
+        # Contracts, design sources, schemas, and project state are never overwritten implicitly.
+        protected = {"docs/project/project-status.yaml"} | {
+            item for item in EXTRA_FILES if item.endswith((".fig", ".yaml", ".sql"))
         }
         allow_overwrite = overwrite and pattern not in protected
         status = write_if_missing(target, content, allow_overwrite)

@@ -29,17 +29,17 @@ Inspect the supplied artifact path and requested outcome, then select the narrow
 | Initialize or audit project document paths and language | `$project-structure-governance` | Use that skill's canonical layout |
 | Create a new feature documentation skeleton | `feature-doc-bootstrap` | [New Demand Checklist](references/standards/new-demand-init-checklist.md) |
 | Create an event-scoped release record | `release-record-bootstrap` | [Release Template](references/templates/release-record-template.md) |
-| Review `docs/product/*.md` | `prd-qa-checker` | [PRD QA Rules](references/checkers/prd-qa-checker.md) |
-| Review `docs/design/*.md` and local design assets | `ui-design-checker` | [UI Design Rules](references/checkers/ui-design-checker.md) |
-| Review `docs/development/*.md` | `architecture-design-checker` | [Architecture Rules](references/checkers/architecture-design-checker.md) |
-| Validate `docs/development/openapi/openapi.yaml` | `api-contract-checker` | [API Contract Rules](references/checkers/api-contract-checker.md) |
-| Review `docs/testing/*-test-cases.md` | `test-case-checker` | [Test Case Rules](references/checkers/test-case-checker.md) |
-| Review `docs/testing/*-test-report.md` | `test-report-checker` | [Test Report Rules](references/checkers/test-report-checker.md) |
-| Review `docs/retrospective/*-retro.md` | `retrospective-checker` | [Retrospective Rules](references/checkers/retrospective-checker.md) |
+| Review `docs/product/<feature>/` | `prd-qa-checker` | [PRD QA Rules](references/checkers/prd-qa-checker.md) |
+| Review `docs/design/<feature>/` and local design assets | `ui-design-checker` | [UI Design Rules](references/checkers/ui-design-checker.md) |
+| Review `docs/development/<feature>/` | `architecture-design-checker` | [Architecture Rules](references/checkers/architecture-design-checker.md) |
+| Validate `docs/development/<feature>/openapi/001-openapi.yaml` | `api-contract-checker` | [API Contract Rules](references/checkers/api-contract-checker.md) |
+| Review `docs/testing/<feature>/test-cases/` | `test-case-checker` | [Test Case Rules](references/checkers/test-case-checker.md) |
+| Review `docs/testing/<feature>/test-report/` | `test-report-checker` | [Test Report Rules](references/checkers/test-report-checker.md) |
+| Review `docs/retrospective/<feature>/` | `retrospective-checker` | [Retrospective Rules](references/checkers/retrospective-checker.md) |
 | Review milestones and risks | `project-status-checker` | [Project Status Rules](references/checkers/project-status-checker.md) |
 | Audit one feature across all artifacts | `artifact-consistency-checker` | [Consistency Rules](references/checkers/artifact-consistency-checker.md) |
 | Run the complete feature gate | `feature-governance-check` | [Governance Rules](references/checkers/feature-governance-check.md) |
-| Review `docs/release/*.md` | `release-readiness-checker` | [Release Rules](references/checkers/release-readiness-checker.md) |
+| Review `docs/release/<release-event>/` | `release-readiness-checker` | [Release Rules](references/checkers/release-readiness-checker.md) |
 | Define lifecycle workflow, roles, or handoffs | `project-development-standard` | [Development Standard](references/standards/project-development-standard.md) |
 
 For a generic project-management check, inspect available documents first. Do not guess the module from the request wording alone. For API contract or design-to-implementation diff requests, apply the manual development standard; dedicated automated modules do not exist yet.
@@ -47,8 +47,9 @@ For a generic project-management check, inspect available documents first. Do no
 ## Delegate Document Governance
 
 Use `$project-structure-governance` before creating or auditing lifecycle artifacts. Treat its `references/project-layout.json` as the only authoritative path definition and its checker result as the document-storage gate. Do not redefine the complete directory layout in this skill.
+Apply its [total-part document bundle standard](../project-structure-governance/references/document-bundle-standard.md): start every bundle with `001-overview.md`, keep one topic per numbered file, and use continuous three-digit numbering.
 
-Before creating a feature artifact, search its canonical path returned by the document-governance skill. Update an existing feature document and append a change record for enhancements or fixes instead of creating a parallel versioned document. Continue to treat shared project state as non-overwritable during feature initialization.
+Before creating a feature artifact, search its canonical path returned by the structure-governance skill. Update an existing feature bundle and append numbered chapters or change records for enhancements or fixes instead of creating a parallel bundle. Continue to treat shared project state as non-overwritable during feature initialization.
 
 ## Run Modules
 
@@ -57,16 +58,16 @@ Run commands from this skill's repository root. Replace paths and identifiers wi
 ```bash
 python3 scripts/feature_doc_bootstrap.py --workspace /path/to/repo --feature payment-confirmation --issue WAR-342
 python3 scripts/release_record_bootstrap.py --workspace /path/to/repo --date 2026-07-12 --issue WAR-346 --slug payment-release
-python3 scripts/prd_qa_checker.py --prd docs/product/payment-confirmation.md --issue WAR-342 --output auto
-python3 scripts/ui_design_checker.py --ui docs/design/payment-confirmation.md --issue WAR-342 --output auto
-python3 scripts/architecture_design_checker.py --design docs/development/payment-confirmation.md --issue WAR-342 --output auto
-python3 scripts/api_contract_checker.py --input docs/development/openapi/openapi.yaml --baseline previous-openapi.yaml --fail-on block
-python3 scripts/test_case_checker.py --testcase docs/testing/payment-confirmation-test-cases.md --issue WAR-342 --output auto
+python3 scripts/prd_qa_checker.py --prd docs/product/payment-confirmation/ --issue WAR-342 --output auto
+python3 scripts/ui_design_checker.py --ui docs/design/payment-confirmation/ --issue WAR-342 --output auto
+python3 scripts/architecture_design_checker.py --design docs/development/payment-confirmation/ --issue WAR-342 --output auto
+python3 scripts/api_contract_checker.py --input docs/development/payment-confirmation/openapi/001-openapi.yaml --baseline previous-openapi.yaml --fail-on block
+python3 scripts/test_case_checker.py --testcase docs/testing/payment-confirmation/test-cases/ --issue WAR-342 --output auto
 python3 scripts/artifact_consistency_checker.py --workspace /path/to/repo --feature payment-confirmation --stage development --issue WAR-342 --output auto
 python3 scripts/feature_governance_check.py --workspace /path/to/repo --feature payment-confirmation --stage development --issue WAR-342 --output auto
-python3 scripts/release_readiness_checker.py --release docs/release/release-record.md --issue WAR-346 --output auto
-python3 scripts/test_report_checker.py --input docs/testing/payment-confirmation-test-report.md
-python3 scripts/retrospective_checker.py --input docs/retrospective/payment-confirmation-retro.md
+python3 scripts/release_readiness_checker.py --release docs/release/2026-07-12-WAR-346-payment-release/ --issue WAR-346 --output auto
+python3 scripts/test_report_checker.py --input docs/testing/payment-confirmation/test-report/
+python3 scripts/retrospective_checker.py --input docs/retrospective/payment-confirmation/
 python3 scripts/project_status_checker.py --input docs/project/project-status.yaml
 ```
 

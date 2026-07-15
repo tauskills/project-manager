@@ -20,7 +20,7 @@ It does not answer:
 
 Recommended inputs:
 
-- test case Markdown path, canonical location `docs/testing/{feature-slug}-test-cases.md`
+- test case Markdown path, canonical location `docs/testing/{feature-slug}/test-cases/`
 - optional issue identifier
 
 Recommended durable output path:

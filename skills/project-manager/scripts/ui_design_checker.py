@@ -5,6 +5,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from .document_bundle import document_slug, read_document
+except ImportError:  # Support direct execution from the skill directory.
+    from document_bundle import document_slug, read_document
+
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 PLACEHOLDER_VALUES = {"", "-", "—", "/", "待补充", "todo", "tbd", "n/a"}
@@ -27,7 +32,7 @@ def normalize_text(value: str) -> str:
 
 
 def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return read_document(path)
 
 
 def find_docs_root(path: Path) -> Path | None:
@@ -41,7 +46,7 @@ def derive_output_path(ui_path: Path) -> Path:
     docs_root = find_docs_root(ui_path)
     if docs_root is None:
         raise ValueError("`--output auto` requires the UI design document to live under a `docs/` directory.")
-    return docs_root / "review" / "ui-design" / f"{ui_path.stem}.ui-design.generated.md"
+    return docs_root / "review" / "ui-design" / f"{document_slug(ui_path)}.ui-design.generated.md"
 
 
 def split_sections(markdown: str) -> dict[str, str]:
@@ -187,9 +192,9 @@ def analyze_ui_design(markdown: str, ui_doc_path: Path) -> dict:
     else:
         passes.append(f"验收重点存在 {len(acceptance_items)} 条")
 
-    feature_slug = ui_doc_path.stem
-    fig_file = ui_doc_path.with_suffix(".fig")
-    design_dir = ui_doc_path.parent / feature_slug
+    feature_slug = document_slug(ui_doc_path)
+    design_dir = ui_doc_path if ui_doc_path.is_dir() else ui_doc_path.parent / feature_slug
+    fig_file = design_dir / "assets/design-source.fig" if ui_doc_path.is_dir() else ui_doc_path.with_suffix(".fig")
     screens_dir = design_dir / "screens"
     assets_dir = design_dir / "assets"
     exports_dir = design_dir / "exports"
@@ -277,7 +282,7 @@ def render_markdown(report: dict, ui_path: str, issue: str | None) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run UI design handoff checks for template-based Markdown docs and local assets.")
-    parser.add_argument("--ui", required=True, help="Path to UI design Markdown file")
+    parser.add_argument("--ui", required=True, help="Path to a UI design document bundle or legacy Markdown file")
     parser.add_argument("--issue", help="Optional issue identifier")
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     parser.add_argument("--output", help="Optional file path to save rendered report, or `auto` for canonical docs/review output")

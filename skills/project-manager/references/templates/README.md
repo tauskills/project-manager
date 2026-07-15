@@ -23,3 +23,5 @@
 - [Release Record Template](release-record-template.md)
 - [Test Report Template](test-report-template.md)
 - [Project Status Template](project-status-template.yaml)
+
+这些文件是文档包的聚合模板源。`feature-doc-bootstrap` 和 `release-record-bootstrap` 会按二级标题拆成 `001-overview.md`、`002-...md` 等连续编号章节，并在总览中生成章节目录；业务仓库不应复制成单一大文件。
