@@ -3,10 +3,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
+from scripts import paperclip_session
 from scripts.paperclip_hygiene_checker import analyze, validate_allow_paths
 from scripts.paperclip_session import (
     close_session,
@@ -284,6 +288,54 @@ class PaperclipSessionTests(unittest.TestCase):
             self.assertEqual("allow", analyze(workspace, selected_session=first.name)["decision"])
             self.assertEqual("allow", analyze(workspace, selected_session=second.name)["decision"])
 
+    def test_concurrent_create_records_overlap_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            barrier = threading.Barrier(2)
+            original_active_session_keys = paperclip_session.active_session_keys
+
+            def synchronized_active_session_keys(target: Path) -> list[str]:
+                snapshot = original_active_session_keys(target)
+                try:
+                    barrier.wait(timeout=0.2)
+                except threading.BrokenBarrierError:
+                    pass
+                return snapshot
+
+            def create(slug: str, offset: int) -> Path:
+                return create_session(
+                    workspace,
+                    slug,
+                    [f"docs/{slug}.md"],
+                    PASS_COMMAND,
+                    started_at=FIXED_TIME + timedelta(seconds=offset),
+                )
+
+            with mock.patch.object(
+                paperclip_session,
+                "active_session_keys",
+                side_effect=synchronized_active_session_keys,
+            ):
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = [
+                        executor.submit(create, "payment-policy", 0),
+                        executor.submit(create, "checkout-policy", 1),
+                    ]
+                    sessions = [future.result() for future in futures]
+
+            contexts = {
+                session.name: json.loads((session / "context.json").read_text(encoding="utf-8"))
+                for session in sessions
+            }
+            overlap_pairs = [
+                (session_key, peer_key)
+                for session_key, context in contexts.items()
+                for peer_key in context["overlapping_session_keys"]
+            ]
+            self.assertEqual(1, len(overlap_pairs))
+            self.assertEqual(set(contexts), set(overlap_pairs[0]))
+
     def test_active_peer_only_claims_change_after_its_own_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -423,6 +475,57 @@ class PaperclipSessionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ownership evidence"):
                 purge_session(workspace, first.name)
             self.assertTrue(first.exists())
+
+    def test_normal_purge_preserves_evidence_when_peer_overlap_is_unreadable(self) -> None:
+        for corrupt_context in (None, {"overlapping_session_keys": "invalid"}, "{invalid json"):
+            with self.subTest(corrupt_context=corrupt_context):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    workspace = Path(temp_dir)
+                    initialize_repository(workspace)
+                    closed = create_session(
+                        workspace,
+                        "payment-policy",
+                        ["docs/payment-policy.md"],
+                        PASS_COMMAND,
+                        expected_outputs=["docs/payment-policy.md"],
+                        started_at=FIXED_TIME,
+                    )
+                    active = create_session(
+                        workspace,
+                        "checkout-policy",
+                        ["docs/checkout-policy.md"],
+                        PASS_COMMAND,
+                        started_at=FIXED_TIME + timedelta(seconds=1),
+                    )
+                    (workspace / "docs").mkdir()
+                    (workspace / "docs/payment-policy.md").write_text("# Payment policy\n", encoding="utf-8")
+                    (closed / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+                    result = close_session(workspace, closed.name)
+                    self.assertTrue(result["closed"])
+                    self.assertTrue(closed.exists())
+
+                    if corrupt_context is None:
+                        context = json.loads((active / "context.json").read_text(encoding="utf-8"))
+                        context.pop("overlapping_session_keys")
+                        (active / "context.json").write_text(
+                            json.dumps(context, ensure_ascii=False, indent=2) + "\n",
+                            encoding="utf-8",
+                        )
+                    elif isinstance(corrupt_context, dict):
+                        context = json.loads((active / "context.json").read_text(encoding="utf-8"))
+                        context.update(corrupt_context)
+                        (active / "context.json").write_text(
+                            json.dumps(context, ensure_ascii=False, indent=2) + "\n",
+                            encoding="utf-8",
+                        )
+                    else:
+                        (active / "context.json").write_text(corrupt_context, encoding="utf-8")
+
+                    with self.assertRaisesRegex(ValueError, "ownership evidence"):
+                        purge_session(workspace, closed.name)
+                    self.assertTrue(closed.exists())
+                    purge_session(workspace, closed.name, force=True)
+                    self.assertFalse(closed.exists())
 
     def test_corrupt_peer_contract_cannot_claim_outside_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fcntl
 import fnmatch
 import hashlib
 import json
@@ -8,7 +9,9 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -17,6 +20,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SESSION_KEY_RE = re.compile(r"^\d{8}T\d{6}Z-[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROHIBITED_SLUG_PARTS = {"agent", "paperclip", "session", "task", "temp", "temporary", "todo", "wip"}
 PROCESS_RELATIVE = Path(".run/paperclip")
+LIFECYCLE_LOCK_NAME = ".lifecycle.lock"
 SESSION_DIRECTORIES = ("notes", "screens", "logs", "scratch")
 BROAD_CONTRACT_PATHS = {".", "*", "**", "./**"}
 CONTRACT_FIELDS = (
@@ -174,6 +178,35 @@ def assert_local_process_path(workspace: Path) -> None:
         current /= part
         if current.is_symlink():
             raise ValueError(f"process path must not contain symlinks: {current}")
+
+
+@contextmanager
+def workspace_lifecycle_lock(workspace: Path):
+    workspace = workspace.resolve()
+    assert_local_process_path(workspace)
+    lock_root = Path(tempfile.gettempdir()) / f"paperclip-workspace-locks-{os.getuid()}"
+    lock_root.mkdir(mode=0o700, exist_ok=True)
+    if lock_root.is_symlink() or not lock_root.is_dir():
+        raise ValueError(f"workspace lifecycle lock directory is not a local directory: {lock_root}")
+    lock_stat = lock_root.stat()
+    if lock_stat.st_uid != os.getuid() or lock_stat.st_mode & 0o077:
+        raise ValueError(f"workspace lifecycle lock directory has unsafe ownership or permissions: {lock_root}")
+    workspace_key = hashlib.sha256(os.fsencode(workspace)).hexdigest()
+    lock_path = lock_root / f"{workspace_key}{LIFECYCLE_LOCK_NAME}"
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as exc:
+        raise ValueError(f"unable to open workspace lifecycle lock: {exc}") from exc
+    try:
+        with os.fdopen(descriptor, "a+") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            yield
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    except OSError as exc:
+        raise ValueError(f"unable to use workspace lifecycle lock: {exc}") from exc
 
 
 def normalize_time(value: datetime | None) -> datetime:
@@ -445,21 +478,27 @@ def active_peer_sessions(
         except (OSError, ValueError):
             return peers
     for session in sessions_root.iterdir():
-        if session.name == selected_session_key or not session.is_dir() or session.is_symlink():
+        if session.name == selected_session_key:
+            continue
+        if session.is_symlink() or not session.is_dir():
+            peers.append(session)
             continue
         try:
             context = json.loads((session / "context.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            peers.append(session)
             continue
-        if (
-            isinstance(context, dict)
-            and context.get("schema_version") == 2
-            and sessions_overlap(selected_session_key, selected_context, session.name, context)
-            and (
-                context.get("status") == "active"
-                or not contract_digest_is_valid(context)
-            )
-        ):
+        if not isinstance(context, dict) or context.get("schema_version") != 2:
+            peers.append(session)
+            continue
+        try:
+            selected_peers = validate_session_key_list(selected_context.get("overlapping_session_keys", []))
+            peer_peers = validate_session_key_list(context.get("overlapping_session_keys", []))
+        except ValueError:
+            peers.append(session)
+            continue
+        overlaps = session.name in selected_peers or selected_session_key in peer_peers
+        if not contract_digest_is_valid(context) or (overlaps and context.get("status") == "active"):
             peers.append(session)
     return peers
 
@@ -516,7 +555,7 @@ def active_session_keys(workspace: Path) -> list[str]:
     return sorted(keys)
 
 
-def create_session(
+def _create_session_unlocked(
     workspace: Path,
     slug: str,
     allowed_paths: list[str],
@@ -603,6 +642,34 @@ def create_session(
     return session
 
 
+def create_session(
+    workspace: Path,
+    slug: str,
+    allowed_paths: list[str],
+    verification_commands: list[list[str]],
+    forbidden_paths: list[str] | None = None,
+    expected_outputs: list[str] | None = None,
+    task_ref: str | None = None,
+    agent_ref: str | None = None,
+    retention: str = "discard",
+    started_at: datetime | None = None,
+) -> Path:
+    workspace = workspace.resolve()
+    with workspace_lifecycle_lock(workspace):
+        return _create_session_unlocked(
+            workspace,
+            slug,
+            allowed_paths,
+            verification_commands,
+            forbidden_paths=forbidden_paths,
+            expected_outputs=expected_outputs,
+            task_ref=task_ref,
+            agent_ref=agent_ref,
+            retention=retention,
+            started_at=started_at,
+        )
+
+
 def session_path(workspace: Path, session_key: str) -> Path:
     if not SESSION_KEY_RE.fullmatch(session_key):
         raise ValueError("invalid session key")
@@ -655,7 +722,7 @@ def run_verification_commands(workspace: Path, commands: list[list[str]], timeou
     return results
 
 
-def close_session(
+def _close_session_unlocked(
     workspace: Path,
     session_key: str,
     task_title: str | None = None,
@@ -804,7 +871,27 @@ def close_session(
     return {"closed": True, "purged": purged, "delivery": delivery, "decision": "allow"}
 
 
-def purge_session(workspace: Path, session_key: str, force: bool = False) -> None:
+def close_session(
+    workspace: Path,
+    session_key: str,
+    task_title: str | None = None,
+    integration_paths: list[str] | None = None,
+    archive_ref: str | None = None,
+    timeout: int = 600,
+) -> dict:
+    workspace = workspace.resolve()
+    with workspace_lifecycle_lock(workspace):
+        return _close_session_unlocked(
+            workspace,
+            session_key,
+            task_title=task_title,
+            integration_paths=integration_paths,
+            archive_ref=archive_ref,
+            timeout=timeout,
+        )
+
+
+def _purge_session_unlocked(workspace: Path, session_key: str, force: bool = False) -> None:
     session = session_path(workspace.resolve(), session_key)
     context = load_context(session)
     if not force and not contract_digest_is_valid(context):
@@ -825,6 +912,12 @@ def purge_session(workspace: Path, session_key: str, force: bool = False) -> Non
         if not delivery.get("archive_ref"):
             raise ValueError("external archive evidence is missing")
     shutil.rmtree(session)
+
+
+def purge_session(workspace: Path, session_key: str, force: bool = False) -> None:
+    workspace = workspace.resolve()
+    with workspace_lifecycle_lock(workspace):
+        _purge_session_unlocked(workspace, session_key, force=force)
 
 
 def parse_time(value: str | None) -> datetime | None:
