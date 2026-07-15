@@ -49,7 +49,8 @@ PAPERCLIP_CONTEXT_RE = re.compile(
     r"(?:paperclip.{0,48}\b(?:task|agent|prompt|assignment|run|session)\b|\b(?:task|agent|prompt|assignment|run|session)\b.{0,48}paperclip)",
     re.IGNORECASE,
 )
-PAPERCLIP_TRAILER_RE = re.compile(r"^[A-Za-z][A-Za-z-]*:\s*.*\bPaperclip\b", re.IGNORECASE | re.MULTILINE)
+REQUIRED_PAPERCLIP_TRAILER = "Co-Authored-By: Paperclip <noreply@paperclip.ing>"
+PAPERCLIP_TEXT_RE = re.compile(r"\bPaperclip\b", re.IGNORECASE)
 PROCESS_LINK_RE = re.compile(r"(?:^|[/'\"`])\.run/paperclip(?:/|$)")
 UNCHECKED_TODO_RE = re.compile(r"^\s*[-*]\s+\[\s\]", re.MULTILINE)
 IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
@@ -529,7 +530,10 @@ def check_git_provenance(
         for ref, kind in references.items():
             if ref in message:
                 findings.append(finding("block", f"git.{kind}.commit", "git-log", f"A session commit message contains the current {kind}.", "Rewrite the commit message with project-owned terminology."))
-        if PAPERCLIP_CONTEXT_RE.search(message) or PAPERCLIP_TRAILER_RE.search(message):
+        remaining_message = "\n".join(
+            line for line in message.splitlines() if line != REQUIRED_PAPERCLIP_TRAILER
+        )
+        if PAPERCLIP_CONTEXT_RE.search(remaining_message) or PAPERCLIP_TEXT_RE.search(remaining_message):
             findings.append(finding("block", "git.paperclip_context.commit", "git-log", "A session commit message contains Paperclip execution context.", "Rewrite the commit message with project-owned terminology."))
         if title_derived(message, task_title):
             findings.append(finding("revise", "git.task_title.commit", "git-log", "A session commit message closely matches the runtime task title.", "Rewrite it as a stable description of the project change."))

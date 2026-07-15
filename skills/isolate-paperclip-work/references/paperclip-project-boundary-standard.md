@@ -53,6 +53,8 @@ Paperclip task 和 prompt 不得成为项目唯一事实来源。产品要求必
 
 使用检查器例外时必须指定最小 `--allow-path`。禁止放行仓库根、`src/`、`docs/`、`tests/` 等宽泛路径。例外路径仍需人工检查当前执行上下文泄漏。
 
+Git 提交信息仅允许一项平台级归属例外：独立一行且完整等于 `Co-Authored-By: Paperclip <noreply@paperclip.ing>` 的 trailer。隔离审计在检查提交 subject/body 时只剔除此精确行；大小写、空白、邮箱、键名或附加文本不同的近似值，以及其余任何 Paperclip 文本，仍按 `git.paperclip_context.commit` 阻断。该例外不允许 task、agent、run、prompt、指派或其他执行上下文进入提交信息，也不构成路径级放行。
+
 ## 3. 本地过程区
 
 唯一默认过程根目录为：
