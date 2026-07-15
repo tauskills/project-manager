@@ -21,6 +21,7 @@ SESSION_KEY_RE = re.compile(r"^\d{8}T\d{6}Z-[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROHIBITED_SLUG_PARTS = {"agent", "paperclip", "session", "task", "temp", "temporary", "todo", "wip"}
 PROCESS_RELATIVE = Path(".run/paperclip")
 LIFECYCLE_LOCK_NAME = ".lifecycle.lock"
+LEGACY_CONTEXT_BACKUP = "overlap-migration-backup.json"
 SESSION_DIRECTORIES = ("notes", "screens", "logs", "scratch")
 BROAD_CONTRACT_PATHS = {".", "*", "**", "./**"}
 CONTRACT_FIELDS = (
@@ -689,6 +690,115 @@ def load_context(session: Path) -> dict:
     return context
 
 
+def write_context(path: Path, context: dict) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(context, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def legacy_overlap_peer_keys(workspace: Path, selected_session_key: str) -> list[str]:
+    sessions_root = workspace / PROCESS_RELATIVE / "sessions"
+    if not sessions_root.is_dir() or sessions_root.is_symlink():
+        return []
+    return sorted(
+        session.name
+        for session in sessions_root.iterdir()
+        if session.name != selected_session_key
+        and session.is_dir()
+        and not session.is_symlink()
+        and SESSION_KEY_RE.fullmatch(session.name)
+    )
+
+
+def _migrate_legacy_context_unlocked(
+    workspace: Path,
+    session_key: str,
+    rollback: bool = False,
+) -> dict:
+    workspace = workspace.resolve()
+    session = session_path(workspace, session_key)
+    context_path = session / "context.json"
+    backup_path = session / "scratch" / LEGACY_CONTEXT_BACKUP
+    if rollback:
+        if not backup_path.is_file() or backup_path.is_symlink():
+            raise ValueError("legacy context migration backup is missing")
+        context = load_context(session)
+        if (
+            context.get("schema_version") != 2
+            or "overlapping_session_keys" not in context
+            or not contract_digest_is_valid(context)
+        ):
+            raise ValueError("current context is not a valid migrated version 2 contract")
+        try:
+            backup = json.loads(backup_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"unable to read legacy context migration backup: {exc}") from exc
+        if (
+            not isinstance(backup, dict)
+            or backup.get("schema_version") != 1
+            or not isinstance(backup.get("legacy_contract_digest"), str)
+        ):
+            raise ValueError("legacy context migration backup is invalid")
+        restored = dict(context)
+        restored.pop("overlapping_session_keys")
+        restored["contract_digest"] = backup["legacy_contract_digest"]
+        if not contract_digest_is_valid(restored):
+            raise ValueError("legacy context migration backup does not match the current contract")
+        write_context(context_path, restored)
+        return {"session": session_key, "rolled_back": True, "migrated": False}
+
+    context = load_context(session)
+    if context.get("schema_version") != 2:
+        raise ValueError("migration requires a version 2 session")
+    if not contract_digest_is_valid(context):
+        raise ValueError("refusing to migrate a context with a mismatched contract digest")
+    if "overlapping_session_keys" in context:
+        validate_session_key_list(context["overlapping_session_keys"])
+        return {"session": session_key, "rolled_back": False, "migrated": False}
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    backup = {
+        "schema_version": 1,
+        "legacy_contract_digest": context["contract_digest"],
+    }
+    if backup_path.exists():
+        try:
+            existing_backup = json.loads(backup_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"unable to read legacy context migration backup: {exc}") from exc
+        if existing_backup != backup:
+            raise ValueError("legacy context migration backup does not match this contract")
+    else:
+        write_context(backup_path, backup)
+    context["overlapping_session_keys"] = legacy_overlap_peer_keys(workspace, session_key)
+    context["contract_digest"] = contract_digest(context)
+    write_context(context_path, context)
+    return {
+        "session": session_key,
+        "rolled_back": False,
+        "migrated": True,
+        "overlapping_session_keys": context["overlapping_session_keys"],
+    }
+
+
+def migrate_legacy_context(
+    workspace: Path,
+    session_key: str,
+    rollback: bool = False,
+) -> dict:
+    workspace = workspace.resolve()
+    with workspace_lifecycle_lock(workspace):
+        return _migrate_legacy_context_unlocked(workspace, session_key, rollback=rollback)
+
+
 def run_verification_commands(workspace: Path, commands: list[list[str]], timeout: int) -> list[dict]:
     results = []
     for command in commands:
@@ -957,6 +1067,11 @@ def main() -> int:
     purge.add_argument("--workspace", required=True)
     purge.add_argument("--session", required=True)
     purge.add_argument("--force", action="store_true", help="Delete abandoned work that did not close")
+
+    migrate = subparsers.add_parser("migrate", help="Add overlap metadata to a legacy version 2 session")
+    migrate.add_argument("--workspace", required=True)
+    migrate.add_argument("--session", required=True)
+    migrate.add_argument("--rollback", action="store_true", help="Restore the validated pre-migration context")
     args = parser.parse_args()
 
     try:
@@ -986,6 +1101,10 @@ def main() -> int:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result["closed"] else 1
+        if args.command == "migrate":
+            result = migrate_legacy_context(Path(args.workspace), args.session, rollback=args.rollback)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
         purge_session(Path(args.workspace), args.session, force=args.force)
         print(f"purged {args.session}")
         return 0

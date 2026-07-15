@@ -10,11 +10,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILL_ROOT))
+
 from scripts import paperclip_session
 from scripts.paperclip_hygiene_checker import analyze, validate_allow_paths
 from scripts.paperclip_session import (
     close_session,
+    contract_digest,
     create_session,
+    migrate_legacy_context,
     purge_session,
     validate_slug,
 )
@@ -22,7 +27,7 @@ from scripts.paperclip_session import (
 
 FIXED_TIME = datetime(2026, 7, 15, 10, 30, tzinfo=timezone.utc)
 PASS_COMMAND = [[sys.executable, "-c", "raise SystemExit(0)"]]
-SESSION_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/paperclip_session.py"
+SESSION_SCRIPT = SKILL_ROOT / "scripts/paperclip_session.py"
 
 
 def git(workspace: Path, *args: str) -> subprocess.CompletedProcess:
@@ -87,6 +92,84 @@ class PaperclipSessionTests(unittest.TestCase):
             self.assertNotIn("task_title", context)
             self.assertIn("/.run/paperclip/", (workspace / ".gitignore").read_text(encoding="utf-8"))
             self.assertEqual("allow", analyze(workspace, selected_session=session.name)["decision"])
+
+    def test_legacy_v2_context_requires_migration_and_supports_rollback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = self.make_session(workspace)
+            context_path = session / "context.json"
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+            context.pop("overlapping_session_keys")
+            context["contract_digest"] = contract_digest(context)
+            context_path.write_text(json.dumps(context, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            work_report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            close_report = analyze(
+                workspace,
+                phase="close",
+                selected_session=session.name,
+                scan_mode="changed",
+            )
+            self.assertEqual("revise", work_report["decision"])
+            self.assertEqual("block", close_report["decision"])
+            self.assertIn(
+                "scope.contract_migration_required",
+                {item["code"] for item in work_report["findings"]},
+            )
+
+            migrated = migrate_legacy_context(workspace, session.name)
+            self.assertTrue(migrated["migrated"])
+            self.assertEqual([], migrated["overlapping_session_keys"])
+            self.assertEqual(
+                "allow",
+                analyze(workspace, selected_session=session.name, scan_mode="changed")["decision"],
+            )
+
+            rolled_back = migrate_legacy_context(workspace, session.name, rollback=True)
+            self.assertTrue(rolled_back["rolled_back"])
+            restored = json.loads(context_path.read_text(encoding="utf-8"))
+            self.assertNotIn("overlapping_session_keys", restored)
+            self.assertEqual(context, restored)
+
+    def test_legacy_v2_cli_migration_conservatively_records_existing_peers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            first = self.make_session(workspace)
+            second = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            context_path = first / "context.json"
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+            context.pop("overlapping_session_keys")
+            context["contract_digest"] = contract_digest(context)
+            context_path.write_text(json.dumps(context, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SESSION_SCRIPT),
+                    "migrate",
+                    "--workspace",
+                    str(workspace),
+                    "--session",
+                    first.name,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            result = json.loads(completed.stdout)
+            migrated = json.loads(context_path.read_text(encoding="utf-8"))
+            self.assertTrue(result["migrated"])
+            self.assertEqual([second.name], migrated["overlapping_session_keys"])
+            backup = json.loads((first / "scratch/overlap-migration-backup.json").read_text(encoding="utf-8"))
+            self.assertEqual({"schema_version", "legacy_contract_digest"}, set(backup))
 
     def test_create_requires_git_head_scope_and_verification(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -93,7 +93,12 @@ session key 使用 UTC 时间戳和领域 slug：`YYYYMMDDTHHMMSSZ-{domain-slug}
 | `verification_commands` | 至少一条参数数组；不经过 shell 执行，不得在参数中放密钥 |
 | `baseline_head` | session 创建时的 HEAD |
 | `baseline_changes` | 创建前已有脏路径的状态和内容指纹 |
+| `overlapping_session_keys` | 创建时仍活跃的 peer session key 列表；用于并发归属、关闭与清理门禁，空列表也必须显式记录 |
 | `contract_digest` | 上述不可变契约及 session 状态的规范化摘要；不匹配时直接 block |
+
+旧版 v2 context 可能没有 `overlapping_session_keys`。工作阶段检查器将其标记为 `scope.contract_migration_required`，关闭阶段 block；不把缺失字段默认为可信的空列表，也不允许旧 session 为并发改动提供归属证据。使用 `paperclip_session.py migrate --workspace <workspace> --session <session-key>` 在 workspace lifecycle lock 内迁移：工具先把旧 `contract_digest` 保存到 session 的 `scratch/overlap-migration-backup.json`（不复制 task/agent 引用），再保守记录当前过程区内所有合法 peer session key，重算 digest，并原子替换 context。迁移后重新执行 hygiene 检查和原验证命令。
+
+若新版本工具需要回滚，先停止该 workspace 的 create/close/purge 操作，再运行同一命令并追加 `--rollback`。工具只会恢复 digest 有效、确实缺少该字段的迁移前备份；恢复后旧工具可继续读取，当前工具会再次要求迁移。确认迁移稳定并成功关闭 session 前不得删除备份；session 按 retention 正常清理时，备份随过程区一同删除。
 
 检查器比较 baseline HEAD、后续 commit、暂存区和工作区。创建前未变化的用户改动不计入 agent 范围；agent 对这些文件的覆盖、回退、暂存或提交仍视为新变更。执行期间不得修改范围、baseline、验证命令或其摘要；需要扩展范围时关闭或放弃原 session，并用新契约创建 session。多个 session 并存时必须显式传入当前 `--session`；只有当 peer session 的签名契约声明该路径，且该路径在 peer 自身 baseline 之后变化，或该路径是 peer 的具体 `expected_outputs` 且 baseline 指纹与当前内容一致时，才能从当前 session 的越界集合剔除。当前 session 的 allowed 或 forbidden 路径与 peer 重叠时不允许 peer 代为认领；契约损坏或缺失的 peer 也不得作为归属证据。
 

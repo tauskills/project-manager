@@ -66,7 +66,6 @@ REQUIRED_SESSION_FILES = {"context.json", "todo.md", "handoff.md", "evidence.md"
 OPTIONAL_SESSION_FILES = {"delivery.json"}
 ALLOWED_SESSION_DIRS = {"notes", "screens", "logs", "scratch"}
 ALLOWED_PROCESS_ROOT_DIRECTORIES = {"sessions", "checkouts"}
-ALLOWED_PROCESS_ROOT_FILES = {".lifecycle.lock"}
 FORBIDDEN_CONTEXT_KEYS = {
     "authorization", "cookie", "password", "prompt", "prompt_text", "secret", "task_name", "task_title", "token",
 }
@@ -260,6 +259,16 @@ def check_scope(
     if not contract_digest_is_valid(context):
         findings.append(finding("block", "scope.contract_tampered", relative, "The immutable session contract digest does not match.", "Abandon this session or restore the original contract; create a new session to change scope."))
         return []
+    if "overlapping_session_keys" not in context:
+        severity = "block" if phase == "close" else "revise"
+        findings.append(finding(
+            severity,
+            "scope.contract_migration_required",
+            relative,
+            "This legacy version 2 session predates overlapping-session ownership metadata.",
+            f"Run `paperclip_session.py migrate --workspace {workspace} --session {session.name}`; use the same command with `--rollback` to restore the pre-migration context.",
+        ))
+        return []
     allowed = context.get("allowed_paths")
     forbidden = context.get("forbidden_paths", [])
     commands = context.get("verification_commands")
@@ -275,8 +284,6 @@ def check_scope(
         forbidden = validate_contract_paths(forbidden, "forbidden path")
         validate_verification_commands(commands)
         validate_contract_paths(context.get("expected_outputs", []), "expected output", allow_globs=False)
-        if "overlapping_session_keys" not in context:
-            raise ValueError("session context does not record overlapping_session_keys")
         validate_session_key_list(context["overlapping_session_keys"])
     except (AttributeError, TypeError, ValueError) as exc:
         findings.append(finding("block", "scope.contract_invalid", relative, str(exc), "Create a new session with a valid minimal contract."))
@@ -332,8 +339,7 @@ def check_process_area(
     checkouts_root = process_root / "checkouts"
     for child in sorted(process_root.iterdir()):
         allowed_directory = child.name in ALLOWED_PROCESS_ROOT_DIRECTORIES and child.is_dir() and not child.is_symlink()
-        allowed_file = child.name in ALLOWED_PROCESS_ROOT_FILES and child.is_file() and not child.is_symlink()
-        if not allowed_directory and not allowed_file:
+        if not allowed_directory:
             findings.append(finding("revise", "process.root_entry", relative_path(workspace, child), "Only the sessions and runtime checkouts directories are allowed at the process root.", "Move the artifact into the active session or delete it."))
     if checkouts_root.exists() and (checkouts_root.is_symlink() or not checkouts_root.is_dir()):
         findings.append(finding("block", "process.checkouts_invalid", relative_path(workspace, checkouts_root), "The runtime checkouts path must be a local directory.", "Remove the invalid path and let the execution harness recreate the checkout directory."))
