@@ -22,6 +22,7 @@ PROHIBITED_SLUG_PARTS = {"agent", "paperclip", "session", "task", "temp", "tempo
 PROCESS_RELATIVE = Path(".run/paperclip")
 LIFECYCLE_LOCK_NAME = ".lifecycle.lock"
 LEGACY_CONTEXT_BACKUP = "overlap-migration-backup.json"
+COMMITTED_OWNERSHIP_FILE = "committed-path-ownership.json"
 SESSION_DIRECTORIES = ("notes", "screens", "logs", "scratch")
 BROAD_CONTRACT_PATHS = {".", "*", "**", "./**"}
 CONTRACT_FIELDS = (
@@ -104,6 +105,22 @@ def delivery_digest(delivery: dict) -> str:
 def delivery_digest_is_valid(delivery: dict) -> bool:
     expected = delivery.get("delivery_digest")
     return isinstance(expected, str) and expected == delivery_digest(delivery)
+
+
+def committed_ownership_digest(manifest: dict) -> str:
+    payload = {key: value for key, value in manifest.items() if key != "manifest_digest"}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def ownership_scope_digest(context: dict) -> str:
+    fields = (
+        "schema_version", "session_key", "allowed_paths", "forbidden_paths",
+        "baseline_head", "baseline_changes", "overlapping_session_keys",
+    )
+    payload = {key: context[key] for key in fields if key in context}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def write_delivery(path: Path, delivery: dict) -> None:
@@ -285,7 +302,24 @@ def capture_dirty_baseline(workspace: Path) -> dict[str, dict[str, str]]:
     }
 
 
+def commit_tree_and_parents(workspace: Path, revision: str) -> tuple[bytes, tuple[bytes, ...]] | None:
+    result = git_command(workspace, "show", "-s", "--format=%T%x00%P", revision)
+    if result is None or result.returncode != 0:
+        return None
+    tree, separator, parents = result.stdout.rstrip(b"\n").partition(b"\0")
+    if not separator or not tree:
+        return None
+    return tree, tuple(parents.split())
+
+
 def committed_paths_since(workspace: Path, baseline_head: str) -> set[str]:
+    baseline_identity = commit_tree_and_parents(workspace, baseline_head)
+    head_identity = commit_tree_and_parents(workspace, "HEAD")
+    if baseline_identity is not None and baseline_identity == head_identity:
+        # Another workspace actor may amend only commit metadata after this
+        # session captures its baseline. Identical trees and parent lists prove
+        # no project path changed; a real follow-up or revert changes parents.
+        return set()
     revisions = git_command(workspace, "rev-list", "--reverse", f"{baseline_head}..HEAD")
     if revisions is None or revisions.returncode != 0:
         raise ValueError("unable to compare the current HEAD with the session baseline")
@@ -303,6 +337,207 @@ def committed_paths_since(workspace: Path, baseline_head: str) -> set[str]:
             if item
         )
     return paths
+
+
+def commit_changed_paths(workspace: Path, revision: str) -> set[str]:
+    result = git_command(
+        workspace, "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-m", "-z", revision,
+    )
+    if result is None or result.returncode != 0:
+        raise ValueError(f"unable to inspect commit {revision[:12]}")
+    return {
+        item.decode("utf-8", errors="surrogateescape")
+        for item in result.stdout.split(b"\0")
+        if item
+    }
+
+
+def resolve_commit(workspace: Path, revision: str) -> str:
+    result = git_command(workspace, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    if result is None or result.returncode != 0:
+        raise ValueError(f"invalid commit: {revision}")
+    return result.stdout.decode("ascii", errors="strict").strip()
+
+
+def commit_is_ancestor(workspace: Path, ancestor: str, descendant: str) -> bool:
+    result = git_command(workspace, "merge-base", "--is-ancestor", ancestor, descendant)
+    return result is not None and result.returncode == 0
+
+
+def path_history_digest(workspace: Path, revision: str, relative: str) -> str:
+    result = git_command(workspace, "log", "--format=%H", f"{revision}..HEAD", "--", relative)
+    if result is None or result.returncode != 0:
+        raise ValueError(f"unable to inspect committed history for {relative}")
+    return hashlib.sha256(result.stdout).hexdigest()
+
+
+def load_committed_ownership(workspace: Path, session_key: str, context: dict) -> dict | None:
+    path = session_path(workspace, session_key) / COMMITTED_OWNERSHIP_FILE
+    if not path.exists():
+        return None
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 1
+        or manifest.get("source_session_key") != session_key
+        or manifest.get("source_contract_digest") != context.get("contract_digest")
+        or manifest.get("manifest_digest") != committed_ownership_digest(manifest)
+        or not isinstance(manifest.get("records"), list)
+    ):
+        return None
+    return manifest
+
+
+def committed_ownership_claims_path(
+    workspace: Path,
+    session_key: str,
+    context: dict,
+    relative: str,
+) -> bool:
+    manifest = load_committed_ownership(workspace, session_key, context)
+    if manifest is None:
+        return False
+    for record in manifest["records"]:
+        if not isinstance(record, dict) or not isinstance(record.get("paths"), dict):
+            continue
+        evidence = record["paths"].get(relative)
+        revision = record.get("commit")
+        if not isinstance(evidence, dict) or not isinstance(revision, str):
+            continue
+        try:
+            if (
+                resolve_commit(workspace, revision) != revision
+                or not commit_is_ancestor(workspace, revision, "HEAD")
+                or relative not in commit_changed_paths(workspace, revision)
+                or fingerprint_git_path(workspace, revision, relative) != evidence.get("commit_fingerprint")
+                or fingerprint_git_path(workspace, "HEAD", relative) != evidence.get("head_fingerprint")
+                or path_history_digest(workspace, revision, relative) != evidence.get("post_commit_history_digest")
+            ):
+                continue
+        except ValueError:
+            continue
+        owner = record.get("owner")
+        if not isinstance(owner, dict):
+            continue
+        if owner.get("kind") != "session" or not isinstance(owner.get("session_key"), str):
+            continue
+        owner_key = owner["session_key"]
+        try:
+            owner_context = load_context(session_path(workspace, owner_key))
+            owner_allowed = validate_contract_paths(owner_context.get("allowed_paths", []), "allowed path")
+            owner_forbidden = validate_contract_paths(owner_context.get("forbidden_paths", []), "forbidden path")
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        if (
+            contract_digest_is_valid(owner_context)
+            and owner.get("scope_digest") == ownership_scope_digest(owner_context)
+            and sessions_overlap(session_key, context, owner_key, owner_context)
+            and path_matches_contract(relative, owner_allowed)
+            and not path_matches_contract(relative, owner_forbidden)
+        ):
+            return True
+    return False
+
+
+def _attest_committed_paths_unlocked(
+    workspace: Path,
+    session_key: str,
+    revision: str,
+    paths: list[str],
+    owner_session_key: str,
+) -> dict:
+    session = session_path(workspace, session_key)
+    context = load_context(session)
+    if context.get("status") != "active" or not contract_digest_is_valid(context):
+        raise ValueError("committed ownership requires an active session with a valid contract digest")
+    normalized_paths = validate_contract_paths(paths, "committed ownership path", allow_globs=False)
+    if not normalized_paths:
+        raise ValueError("at least one committed ownership path is required")
+    commit = resolve_commit(workspace, revision)
+    baseline = context.get("baseline_head")
+    if not isinstance(baseline, str) or commit == baseline or not commit_is_ancestor(workspace, baseline, commit):
+        raise ValueError("commit must be after the source session baseline")
+    if not commit_is_ancestor(workspace, commit, "HEAD"):
+        raise ValueError("commit must be an ancestor of HEAD")
+    changed = commit_changed_paths(workspace, commit)
+    missing = [relative for relative in normalized_paths if relative not in changed]
+    if missing:
+        raise ValueError(f"path was not changed by commit {commit[:12]}: {missing[0]}")
+
+    if owner_session_key == session_key:
+        raise ValueError("owner session must differ from source session")
+    owner_context = load_context(session_path(workspace, owner_session_key))
+    if not contract_digest_is_valid(owner_context) or owner_context.get("status") not in {"active", "closed"}:
+        raise ValueError("owner session contract is not valid ownership evidence")
+    if not sessions_overlap(session_key, context, owner_session_key, owner_context):
+        raise ValueError("owner session does not overlap the source session")
+    owner_allowed = validate_contract_paths(owner_context.get("allowed_paths", []), "allowed path")
+    owner_forbidden = validate_contract_paths(owner_context.get("forbidden_paths", []), "forbidden path")
+    for relative in normalized_paths:
+        if not path_matches_contract(relative, owner_allowed) or path_matches_contract(relative, owner_forbidden):
+            raise ValueError(f"owner session contract does not own path: {relative}")
+    owner = {
+        "kind": "session",
+        "session_key": owner_session_key,
+        "scope_digest": ownership_scope_digest(owner_context),
+    }
+
+    evidence = {}
+    for relative in normalized_paths:
+        head_fingerprint = fingerprint_git_path(workspace, "HEAD", relative)
+        if fingerprint_workspace_path(workspace, relative) != head_fingerprint:
+            raise ValueError(f"refusing to attest a path with uncommitted changes: {relative}")
+        evidence[relative] = {
+            "commit_fingerprint": fingerprint_git_path(workspace, commit, relative),
+            "head_fingerprint": head_fingerprint,
+            "post_commit_history_digest": path_history_digest(workspace, commit, relative),
+        }
+
+    manifest = load_committed_ownership(workspace, session_key, context) or {
+        "schema_version": 1,
+        "source_session_key": session_key,
+        "source_contract_digest": context["contract_digest"],
+        "records": [],
+    }
+    record = {
+        "commit": commit,
+        "commit_tree": commit_tree_and_parents(workspace, commit)[0].decode("ascii"),
+        "owner": owner,
+        "paths": evidence,
+        "attested_at": normalize_time(None).isoformat().replace("+00:00", "Z"),
+    }
+    selected_paths = set(normalized_paths)
+    manifest["records"] = [
+        existing for existing in manifest["records"]
+        if not isinstance(existing, dict)
+        or not isinstance(existing.get("paths"), dict)
+        or selected_paths.isdisjoint(existing["paths"])
+    ]
+    manifest["records"].append(record)
+    manifest["manifest_digest"] = committed_ownership_digest(manifest)
+    destination = session / COMMITTED_OWNERSHIP_FILE
+    temporary = destination.with_suffix(".tmp")
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, destination)
+    return record
+
+
+def attest_committed_paths(
+    workspace: Path,
+    session_key: str,
+    revision: str,
+    paths: list[str],
+    owner_session_key: str,
+) -> dict:
+    workspace = workspace.resolve()
+    with workspace_lifecycle_lock(workspace):
+        return _attest_committed_paths_unlocked(
+            workspace, session_key, revision, paths,
+            owner_session_key=owner_session_key,
+        )
 
 
 def validate_session_key_list(value: object, field: str = "overlapping_session_keys") -> list[str]:
@@ -428,7 +663,13 @@ def effective_changed_paths(
     if not isinstance(baseline_head, str) or not isinstance(baseline, dict):
         raise ValueError("session context does not contain a valid Git baseline")
     current_status = git_status_entries(workspace)
-    effective = committed_paths_since(workspace, baseline_head)
+    committed = committed_paths_since(workspace, baseline_head)
+    if selected_session_key:
+        committed = {
+            relative for relative in committed
+            if not committed_ownership_claims_path(workspace, selected_session_key, context, relative)
+        }
+    effective = set(committed)
     for relative in set(current_status) | set(baseline):
         current = {
             "status": current_status.get(relative, "  "),
@@ -461,6 +702,21 @@ def effective_changed_paths(
             == fingerprint_workspace_path(workspace, relative)
         )
         and not peer_session_claims_path(workspace, selected_session_key, context, relative)
+    ]
+
+
+def owned_commit_revisions(workspace: Path, context: dict, selected_session_key: str) -> list[str]:
+    baseline_head = context.get("baseline_head")
+    if not isinstance(baseline_head, str):
+        return []
+    owned_paths = set(effective_changed_paths(workspace, context, selected_session_key))
+    revisions = git_command(workspace, "rev-list", "--reverse", f"{baseline_head}..HEAD")
+    if revisions is None or revisions.returncode != 0:
+        return []
+    return [
+        revision
+        for revision in revisions.stdout.decode("ascii", errors="strict").splitlines()
+        if commit_changed_paths(workspace, revision).intersection(owned_paths)
     ]
 
 
@@ -1072,6 +1328,13 @@ def main() -> int:
     migrate.add_argument("--workspace", required=True)
     migrate.add_argument("--session", required=True)
     migrate.add_argument("--rollback", action="store_true", help="Restore the validated pre-migration context")
+
+    attest = subparsers.add_parser("attest-commit", help="Move committed paths to their verified owner without changing session scope")
+    attest.add_argument("--workspace", required=True)
+    attest.add_argument("--session", required=True, help="Source session currently charged for the paths")
+    attest.add_argument("--commit", required=True, help="Commit that introduced the cross-session paths")
+    attest.add_argument("--path", action="append", required=True, help="Concrete committed path; repeatable")
+    attest.add_argument("--owner-session", required=True, help="Overlapping session whose valid contract owns every path")
     args = parser.parse_args()
 
     try:
@@ -1103,6 +1366,13 @@ def main() -> int:
             return 0 if result["closed"] else 1
         if args.command == "migrate":
             result = migrate_legacy_context(Path(args.workspace), args.session, rollback=args.rollback)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "attest-commit":
+            result = attest_committed_paths(
+                Path(args.workspace), args.session, args.commit, args.path,
+                owner_session_key=args.owner_session,
+            )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         purge_session(Path(args.workspace), args.session, force=args.force)
