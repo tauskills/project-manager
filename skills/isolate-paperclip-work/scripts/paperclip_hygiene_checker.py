@@ -49,6 +49,7 @@ PAPERCLIP_CONTEXT_RE = re.compile(
     r"(?:paperclip.{0,48}\b(?:task|agent|prompt|assignment|run|session)\b|\b(?:task|agent|prompt|assignment|run|session)\b.{0,48}paperclip)",
     re.IGNORECASE,
 )
+PAPERCLIP_TRAILER_RE = re.compile(r"^[A-Za-z][A-Za-z-]*:\s*.*\bPaperclip\b", re.IGNORECASE | re.MULTILINE)
 PROCESS_LINK_RE = re.compile(r"(?:^|[/'\"`])\.run/paperclip(?:/|$)")
 UNCHECKED_TODO_RE = re.compile(r"^\s*[-*]\s+\[\s\]", re.MULTILINE)
 IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
@@ -521,19 +522,19 @@ def check_git_provenance(
     baseline_head = context.get("baseline_head") if context else None
     if not isinstance(baseline_head, str):
         return
-    log_result = git_command(workspace, "log", "--format=%s%x00", f"{baseline_head}..HEAD")
+    log_result = git_command(workspace, "log", "-z", "--format=%B", f"{baseline_head}..HEAD")
     if log_result is None or log_result.returncode != 0:
         return
-    for subject in decode_names(log_result.stdout):
+    for message in decode_names(log_result.stdout):
         for ref, kind in references.items():
-            if ref in subject:
-                findings.append(finding("block", f"git.{kind}.commit", "git-log", f"A session commit subject contains the current {kind}.", "Rewrite the commit message with project-owned terminology."))
-        if PAPERCLIP_CONTEXT_RE.search(subject):
-            findings.append(finding("block", "git.paperclip_context.commit", "git-log", "A session commit subject contains Paperclip execution context.", "Rewrite the commit message with project-owned terminology."))
-        if title_derived(subject, task_title):
-            findings.append(finding("revise", "git.task_title.commit", "git-log", "A session commit subject closely matches the runtime task title.", "Rewrite it as a stable description of the project change."))
+            if ref in message:
+                findings.append(finding("block", f"git.{kind}.commit", "git-log", f"A session commit message contains the current {kind}.", "Rewrite the commit message with project-owned terminology."))
+        if PAPERCLIP_CONTEXT_RE.search(message) or PAPERCLIP_TRAILER_RE.search(message):
+            findings.append(finding("block", "git.paperclip_context.commit", "git-log", "A session commit message contains Paperclip execution context.", "Rewrite the commit message with project-owned terminology."))
+        if title_derived(message, task_title):
+            findings.append(finding("revise", "git.task_title.commit", "git-log", "A session commit message closely matches the runtime task title.", "Rewrite it as a stable description of the project change."))
     if not any(item["code"].startswith("git.") for item in findings):
-        passes.append("Branch and session commit subjects are free of detected Paperclip coupling")
+        passes.append("Branch and session commit messages are free of detected Paperclip coupling")
 
 
 def analyze(

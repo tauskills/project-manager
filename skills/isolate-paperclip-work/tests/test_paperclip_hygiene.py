@@ -971,6 +971,25 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             self.assertIn("git.task_ref.branch", codes)
             self.assertIn("git.task_ref.commit", codes)
 
+    def test_session_commit_body_rejects_paperclip_trailer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = self.make_session(workspace)
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-timeout.md").write_text("# Timeout policy\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-timeout.md")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "document timeout policy",
+                "-m", "Co-Authored-By: Paperclip <noreply@paperclip.ing>",
+            )
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("git.paperclip_context.commit", {item["code"] for item in report["findings"]})
+
     def test_session_managed_gitignore_can_be_committed_without_expanding_scope(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
