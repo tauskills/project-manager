@@ -318,6 +318,13 @@ def peer_session_claims_path(
     selected_context: dict,
     relative: str,
 ) -> bool:
+    try:
+        selected_allowed = validate_contract_paths(selected_context.get("allowed_paths", []), "allowed path")
+        selected_forbidden = validate_contract_paths(selected_context.get("forbidden_paths", []), "forbidden path")
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if path_matches_contract(relative, selected_allowed) or path_matches_contract(relative, selected_forbidden):
+        return False
     sessions_root = workspace / PROCESS_RELATIVE / "sessions"
     if not sessions_root.is_dir() or sessions_root.is_symlink():
         return False
@@ -344,7 +351,23 @@ def peer_session_claims_path(
         if not path_matches_contract(relative, allowed) or path_matches_contract(relative, forbidden):
             continue
         if context.get("status") == "active":
-            return path_changed_since_session_baseline(workspace, context, relative)
+            if path_changed_since_session_baseline(workspace, context, relative):
+                return True
+            try:
+                expected_outputs = validate_contract_paths(
+                    context.get("expected_outputs", []), "expected output", allow_globs=False
+                )
+            except (AttributeError, TypeError, ValueError):
+                continue
+            baseline = context.get("baseline_changes", {})
+            record = baseline.get(relative) if isinstance(baseline, dict) else None
+            if (
+                relative in expected_outputs
+                and isinstance(record, dict)
+                and record.get("fingerprint") == fingerprint_workspace_path(workspace, relative)
+            ):
+                return True
+            continue
         try:
             delivery = json.loads((session / "delivery.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

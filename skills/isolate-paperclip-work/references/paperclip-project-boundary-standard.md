@@ -59,6 +59,7 @@ Paperclip task 和 prompt 不得成为项目唯一事实来源。产品要求必
 
 ```text
 .run/paperclip/
+├── checkouts/                 # 执行 harness 管理的本地 Git worktree
 └── sessions/
     └── 20260715T103000Z-payment-timeout/
         ├── context.json
@@ -73,6 +74,8 @@ Paperclip task 和 prompt 不得成为项目唯一事实来源。产品要求必
 ```
 
 `.run/paperclip/` 必须被 Git 忽略且不得强制入库。项目代码、构建、测试和正式文档不得读取、链接或依赖该目录。不要在仓库其他位置建立第二个 Paperclip 过程目录。
+
+`checkouts/` 是执行 harness 为隔离 Git worktree 保留的运行目录，与 `sessions/` 同为仅允许的过程根目录入口。检查器不将 checkout 内的工作树重复归属给当前 session；每个 checkout 仍应作为独立 workspace 按自身 session 审计。`checkouts/` 必须是本地目录，不得是文件或符号链接；其内容仍必须被 Git 忽略且不得被强制跟踪。
 
 session key 使用 UTC 时间戳和领域 slug：`YYYYMMDDTHHMMSSZ-{domain-slug}`。领域 slug 使用小写 kebab-case，描述稳定能力，不使用 task 标题、task ID、agent 名称、`todo`、`wip`、`temp`、`fix-task` 等过程词。
 
@@ -92,7 +95,7 @@ session key 使用 UTC 时间戳和领域 slug：`YYYYMMDDTHHMMSSZ-{domain-slug}
 | `baseline_changes` | 创建前已有脏路径的状态和内容指纹 |
 | `contract_digest` | 上述不可变契约及 session 状态的规范化摘要；不匹配时直接 block |
 
-检查器比较 baseline HEAD、后续 commit、暂存区和工作区。创建前未变化的用户改动不计入 agent 范围；agent 对这些文件的覆盖、回退、暂存或提交仍视为新变更。执行期间不得修改范围、baseline、验证命令或其摘要；需要扩展范围时关闭或放弃原 session，并用新契约创建 session。多个 session 并存时必须显式传入当前 `--session`，不得让一个 agent 的范围吞并另一个 agent 的改动。
+检查器比较 baseline HEAD、后续 commit、暂存区和工作区。创建前未变化的用户改动不计入 agent 范围；agent 对这些文件的覆盖、回退、暂存或提交仍视为新变更。执行期间不得修改范围、baseline、验证命令或其摘要；需要扩展范围时关闭或放弃原 session，并用新契约创建 session。多个 session 并存时必须显式传入当前 `--session`；只有当 peer session 的签名契约声明该路径，且该路径在 peer 自身 baseline 之后变化，或该路径是 peer 的具体 `expected_outputs` 且 baseline 指纹与当前内容一致时，才能从当前 session 的越界集合剔除。当前 session 的 allowed 或 forbidden 路径与 peer 重叠时不允许 peer 代为认领；契约损坏或缺失的 peer 也不得作为归属证据。
 
 task 标题只通过 `PAPERCLIP_TASK_TITLE` 或检查器参数在运行时参与相似度检测，不得写入 `context.json`。task/agent 引用可以作为不透明值集中存放，但不得进入正式项目资产。
 

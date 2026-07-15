@@ -907,6 +907,85 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             self.assertEqual("block", report["decision"])
             self.assertIn("process.tracked", {item["code"] for item in report["findings"]})
 
+    def test_runtime_checkouts_coexist_with_parallel_session_attribution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/payment-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"],
+                started_at=FIXED_TIME,
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            peer = create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/checkout-policy.md"],
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / ".run/paperclip/checkouts/runtime-worktree").mkdir(parents=True)
+            (workspace / ".run/paperclip/checkouts/runtime-worktree/.git").write_text(
+                "gitdir: /runtime/worktrees/example\n",
+                encoding="utf-8",
+            )
+            (workspace / "docs/payment-policy.md").write_text("# Payment policy\n", encoding="utf-8")
+            (selected / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+
+            result = close_session(workspace, selected.name)
+
+            self.assertTrue(result["closed"])
+            self.assertEqual("allow", result["decision"])
+            self.assertEqual(["docs/payment-policy.md"], result["delivery"]["changed_paths"])
+            self.assertTrue(peer.exists())
+
+    def test_peer_expected_output_cannot_hide_selected_forbidden_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace,
+                "payment-policy",
+                ["docs/**"],
+                PASS_COMMAND,
+                forbidden_paths=["docs/checkout-policy.md"],
+                started_at=FIXED_TIME,
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/checkout-policy.md").write_text("# Checkout policy\n", encoding="utf-8")
+            create_session(
+                workspace,
+                "checkout-policy",
+                ["docs/checkout-policy.md"],
+                PASS_COMMAND,
+                expected_outputs=["docs/checkout-policy.md"],
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+
+            self.assertEqual("block", report["decision"])
+            self.assertIn("scope.forbidden", {item["code"] for item in report["findings"]})
+
+    def test_runtime_checkouts_path_must_be_a_local_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = self.make_session(workspace)
+            external = workspace / "external-checkouts"
+            external.mkdir()
+            (workspace / ".run/paperclip/checkouts").symlink_to(external, target_is_directory=True)
+
+            report = analyze(workspace, selected_session=session.name)
+
+            self.assertEqual("block", report["decision"])
+            self.assertIn("process.checkouts_invalid", {item["code"] for item in report["findings"]})
+
     def test_symlinked_sessions_directory_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
