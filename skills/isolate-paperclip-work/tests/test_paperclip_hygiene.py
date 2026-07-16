@@ -16,6 +16,7 @@ sys.path.insert(0, str(SKILL_ROOT))
 from scripts import paperclip_session
 from scripts.paperclip_hygiene_checker import analyze, validate_allow_paths
 from scripts.paperclip_session import (
+    attest_committed_paths,
     close_session,
     contract_digest,
     create_session,
@@ -170,6 +171,139 @@ class PaperclipSessionTests(unittest.TestCase):
             self.assertEqual([second.name], migrated["overlapping_session_keys"])
             backup = json.loads((first / "scratch/overlap-migration-backup.json").read_text(encoding="utf-8"))
             self.assertEqual({"schema_version", "legacy_contract_digest"}, set(backup))
+
+    def test_legacy_migration_excludes_historical_closed_and_invalid_peers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            historical = create_session(
+                workspace,
+                "historical-owner",
+                ["docs/historical.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            historical_context_path = historical / "context.json"
+            historical_context = json.loads(historical_context_path.read_text(encoding="utf-8"))
+            historical_context["status"] = "closed"
+            historical_context["closed_at"] = (FIXED_TIME + timedelta(seconds=5)).isoformat()
+            historical_context["contract_digest"] = contract_digest(historical_context)
+            historical_context_path.write_text(json.dumps(historical_context), encoding="utf-8")
+            invalid = create_session(
+                workspace,
+                "invalid-owner",
+                ["docs/invalid.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=6),
+            )
+            invalid_context_path = invalid / "context.json"
+            invalid_context = json.loads(invalid_context_path.read_text(encoding="utf-8"))
+            invalid_context["agent_ref"] = "tampered"
+            invalid_context_path.write_text(json.dumps(invalid_context), encoding="utf-8")
+            selected = create_session(
+                workspace,
+                "selected-owner",
+                ["docs/selected.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=10),
+            )
+            selected_context_path = selected / "context.json"
+            selected_context = json.loads(selected_context_path.read_text(encoding="utf-8"))
+            selected_context.pop("overlapping_session_keys")
+            selected_context["contract_digest"] = contract_digest(selected_context)
+            selected_context_path.write_text(json.dumps(selected_context), encoding="utf-8")
+
+            result = migrate_legacy_context(workspace, selected.name)
+
+            self.assertEqual([], result["overlapping_session_keys"])
+
+    def test_legacy_migration_keeps_active_and_close_after_start_peers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            active = create_session(
+                workspace,
+                "active-owner",
+                ["docs/active.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            closing = create_session(
+                workspace,
+                "closing-owner",
+                ["docs/closing.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            selected = create_session(
+                workspace,
+                "selected-owner",
+                ["docs/selected.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=5),
+            )
+            closing_context_path = closing / "context.json"
+            closing_context = json.loads(closing_context_path.read_text(encoding="utf-8"))
+            closing_context["status"] = "closed"
+            closing_context["closed_at"] = (FIXED_TIME + timedelta(seconds=10)).isoformat()
+            closing_context["contract_digest"] = contract_digest(closing_context)
+            closing_context_path.write_text(json.dumps(closing_context), encoding="utf-8")
+            selected_context_path = selected / "context.json"
+            selected_context = json.loads(selected_context_path.read_text(encoding="utf-8"))
+            selected_context.pop("overlapping_session_keys")
+            selected_context["contract_digest"] = contract_digest(selected_context)
+            selected_context_path.write_text(json.dumps(selected_context), encoding="utf-8")
+
+            result = migrate_legacy_context(workspace, selected.name)
+
+            self.assertEqual(sorted([active.name, closing.name]), result["overlapping_session_keys"])
+
+    def test_legacy_migration_does_not_let_closed_peer_own_reverted_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            peer = create_session(
+                workspace,
+                "historical-owner",
+                ["docs/historical.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            peer_context_path = peer / "context.json"
+            peer_context = json.loads(peer_context_path.read_text(encoding="utf-8"))
+            peer_context["status"] = "closed"
+            peer_context["closed_at"] = (FIXED_TIME + timedelta(seconds=5)).isoformat()
+            peer_context["contract_digest"] = contract_digest(peer_context)
+            peer_context_path.write_text(json.dumps(peer_context), encoding="utf-8")
+            selected = create_session(
+                workspace,
+                "selected-owner",
+                ["docs/selected.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=10),
+            )
+            selected_context_path = selected / "context.json"
+            selected_context = json.loads(selected_context_path.read_text(encoding="utf-8"))
+            selected_context.pop("overlapping_session_keys")
+            selected_context["contract_digest"] = contract_digest(selected_context)
+            selected_context_path.write_text(json.dumps(selected_context), encoding="utf-8")
+            historical_path = workspace / "docs/historical.md"
+            historical_path.parent.mkdir()
+            historical_path.write_text("# Historical\n", encoding="utf-8")
+            git(workspace, "add", "docs/historical.md")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add historical")
+            historical_path.unlink()
+            git(workspace, "add", "-u", "docs/historical.md")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "revert historical")
+
+            migrate_legacy_context(workspace, selected.name)
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+
+            self.assertEqual("block", report["decision"])
+            self.assertIn(
+                ("scope.outside", "docs/historical.md"),
+                {(item["code"], item["path"]) for item in report["findings"]},
+            )
 
     def test_create_requires_git_head_scope_and_verification(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -926,6 +1060,171 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             )
             report = analyze(workspace, selected_session=session.name, scan_mode="changed")
             self.assertIn("scope.outside", {item["code"] for item in report["findings"]})
+
+    def test_metadata_only_baseline_amend_does_not_create_false_scope_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            (workspace / "setup.txt").write_text("ready\n", encoding="utf-8")
+            git(workspace, "add", "setup.txt")
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "prepare project",
+            )
+            session = self.make_session(workspace)
+            baseline = git(workspace, "rev-parse", "HEAD").stdout.strip()
+
+            git(
+                workspace,
+                "-c", "user.name=Test",
+                "-c", "user.email=test@example.com",
+                "commit", "--amend", "-q", "-m", "prepare project metadata",
+            )
+
+            self.assertNotEqual(baseline, git(workspace, "rev-parse", "HEAD").stdout.strip())
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            self.assertEqual("allow", report["decision"])
+            self.assertNotIn("scope.outside", {item["code"] for item in report["findings"]})
+
+    def test_attested_peer_owns_committed_outside_path_and_close_allows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "payment-policy", ["docs/payment-policy.md"], PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"], started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace, "checkout-policy", ["src/checkout.py"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "src").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment\n", encoding="utf-8")
+            (workspace / "src/checkout.py").write_text("ENABLED = True\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-policy.md", "src/checkout.py")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add policies")
+            revision = git(workspace, "rev-parse", "HEAD").stdout.strip()
+
+            attest_committed_paths(
+                workspace, selected.name, revision, ["src/checkout.py"], owner_session_key=peer.name,
+            )
+            (selected / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+
+            result = close_session(workspace, selected.name)
+            self.assertTrue(result["closed"])
+            self.assertEqual(["docs/payment-policy.md"], result["delivery"]["changed_paths"])
+
+    def test_attested_peer_can_own_path_forbidden_only_by_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "design-preview", ["docs/design/**"], PASS_COMMAND,
+                forbidden_paths=["docs/product/**"], started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace, "product-policy", ["docs/product/**"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs/product").mkdir(parents=True)
+            (workspace / "docs/product/overview.md").write_text("# Product\n", encoding="utf-8")
+            git(workspace, "add", "docs/product/overview.md")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add product overview")
+            revision = git(workspace, "rev-parse", "HEAD").stdout.strip()
+
+            attest_committed_paths(
+                workspace, selected.name, revision, ["docs/product/overview.md"], owner_session_key=peer.name,
+            )
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("allow", report["decision"])
+            self.assertNotIn("docs/product/overview.md", report["changed_paths"])
+
+    def test_forged_committed_path_fingerprint_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "payment-policy", ["docs/payment-policy.md"], PASS_COMMAND,
+                forbidden_paths=["src/checkout.py"], started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace, "checkout-policy", ["src/checkout.py"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "src").mkdir()
+            (workspace / "src/checkout.py").write_text("ENABLED = True\n", encoding="utf-8")
+            git(workspace, "add", "src/checkout.py")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add checkout")
+            revision = git(workspace, "rev-parse", "HEAD").stdout.strip()
+            attest_committed_paths(
+                workspace, selected.name, revision, ["src/checkout.py"], owner_session_key=peer.name,
+            )
+            manifest_path = selected / paperclip_session.COMMITTED_OWNERSHIP_FILE
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["records"][0]["paths"]["src/checkout.py"]["head_fingerprint"] = "sha256:forged"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("src/checkout.py", report["changed_paths"])
+
+    def test_stale_committed_path_history_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "payment-policy", ["docs/payment-policy.md"], PASS_COMMAND,
+                forbidden_paths=["src/checkout.py"], started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace, "checkout-policy", ["src/checkout.py"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "src").mkdir()
+            checkout = workspace / "src/checkout.py"
+            checkout.write_text("ENABLED = True\n", encoding="utf-8")
+            git(workspace, "add", "src/checkout.py")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add checkout")
+            revision = git(workspace, "rev-parse", "HEAD").stdout.strip()
+            attest_committed_paths(
+                workspace, selected.name, revision, ["src/checkout.py"], owner_session_key=peer.name,
+            )
+            checkout.write_text("ENABLED = False\n", encoding="utf-8")
+            git(workspace, "add", "src/checkout.py")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "change checkout")
+
+            report = analyze(workspace, selected_session=selected.name, scan_mode="changed")
+            self.assertEqual("block", report["decision"])
+            self.assertIn("src/checkout.py", report["changed_paths"])
+
+    def test_retroactive_exact_peer_contract_supports_legacy_committed_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "design-preview", ["docs/design/**"], PASS_COMMAND, started_at=FIXED_TIME,
+            )
+            (workspace / "scripts").mkdir()
+            (workspace / "scripts/legacy_qa.py").write_text("READY = True\n", encoding="utf-8")
+            git(workspace, "add", "scripts/legacy_qa.py")
+            git(workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add qa helper")
+            revision = git(workspace, "rev-parse", "HEAD").stdout.strip()
+            peer = create_session(
+                workspace, "legacy-qa-owner", ["scripts/legacy_qa.py"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+
+            attest_committed_paths(
+                workspace, selected.name, revision, ["scripts/legacy_qa.py"], owner_session_key=peer.name,
+            )
+
+            self.assertEqual(
+                "allow", analyze(workspace, selected_session=selected.name, scan_mode="changed")["decision"],
+            )
 
     def test_reverted_commit_still_counts_as_out_of_scope_touch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -64,6 +64,19 @@ python3 scripts/paperclip_hygiene_checker.py \
 
 Use `--scan staged` before a commit to inspect index content rather than the working copy. The checker also accepts `PAPERCLIP_TASK_REF` and `PAPERCLIP_AGENT_REF`; never persist the task title merely to enable detection.
 
+When an aggregate commit has already charged another owner's path to an older session, do not edit the older session's `allowed_paths`, `forbidden_paths`, baseline, or digest. Add a commit-bound ownership attestation instead:
+
+```bash
+python3 scripts/paperclip_session.py attest-commit \
+  --workspace /path/to/repo \
+  --session 20260715T103000Z-payment-timeout \
+  --commit <commit> \
+  --path 'docs/checkout-policy.md' \
+  --owner-session 20260715T103001Z-checkout-policy
+```
+
+Use repeatable `--path`. If a verified legacy owner has no surviving session evidence, first create a new session whose contract names only the exact legacy paths and a real verification command; use that session as `--owner-session`. The attestation command requires each path to be changed by the named commit, rejects uncommitted path changes, and binds commit/HEAD/path-history fingerprints plus owner scope into `committed-path-ownership.json`. Source `forbidden_paths` can be migrated only when the other owner proves the path; an owner session's own forbidden paths remain ineligible. A later commit touching an attested path or any manifest tampering invalidates the claim, so close fails closed.
+
 ## Promote Outcomes, Not Process
 
 Do not treat a Paperclip task or prompt as the project's source of truth. Link the outcome to the canonical PRD, issue, architecture decision, test evidence, or other repository-approved system. When an intermediate result becomes durable:

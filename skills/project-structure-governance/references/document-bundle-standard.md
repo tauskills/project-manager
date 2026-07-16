@@ -38,7 +38,13 @@ docs/
 ├── testing/<feature-slug>/
 │   ├── 001-overview.md
 │   ├── test-cases/001-overview.md
-│   └── test-report/001-overview.md
+│   └── test-report/
+│       ├── 001-overview.md
+│       └── evidence/<date>-<slug>/
+│           ├── 001-overview.md
+│           ├── screenshots/
+│           ├── logs/
+│           └── attachments/
 ├── retrospective/<feature-slug>/
 │   ├── 001-overview.md
 │   └── ...
@@ -64,6 +70,10 @@ docs/
 ### 测试、发布与复盘
 
 测试功能目录提供总览，再分别维护 `test-cases/` 和 `test-report/` 文档包。每次发布使用事件目录，发布范围、门禁、步骤、回滚、监控和结果各自成章。复盘按功能建立目录，将时间线、根因、改进动作和结论分章维护。
+
+测试原始证据归属于对应功能的测试报告，放入 `test-report/evidence/<date>-<slug>/`。证据集以 `001-overview.md` 建立报告引用、采集环境、时间、执行者角色、文件清单、脱敏检查和可达性结论；截图放 `screenshots/`，浏览器网络、控制台、运行和命令输出的脱敏摘要放 `logs/`，其他可文本复核的结构化结果放 `attachments/`。截图命名为 `NNN-{before|after|error|verification}-<surface-slug>.<png|jpg|jpeg|webp>`；日志命名为 `NNN-{browser-console|browser-network|runtime|command}-summary.<txt|json|csv|xml>`；附件命名为 `NNN-<artifact-slug>.<txt|json|csv|xml>`。
+
+不得归档原始 HAR、完整响应体、cookie、token、密码、测试账号、邮箱、手机号或其他 PII。先最小化并脱敏，再写入证据集；无法证明脱敏或无法从报告稳定到达的文件不能作为发布门禁证据。历史散落证据迁移时先建立证据集索引，再按类型和三位序号重命名，更新报告引用，最后删除旧路径；不得让新旧 canonical path 长期并存。
 
 ## 旧结构迁移
 

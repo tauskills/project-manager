@@ -106,6 +106,14 @@ session key 使用 UTC 时间戳和领域 slug：`YYYYMMDDTHHMMSSZ-{domain-slug}
 
 task 标题只通过 `PAPERCLIP_TASK_TITLE` 或检查器参数在运行时参与相似度检测，不得写入 `context.json`。task/agent 引用可以作为不透明值集中存放，但不得进入正式项目资产。
 
+### 3.2 已提交路径归属证明
+
+共享提交在旧 session baseline 后混入其他 owner 的正式资产时，不得通过修改旧 session 的 `allowed_paths`、`forbidden_paths`、`baseline_head`、`baseline_changes` 或 `contract_digest` 消除门禁，也不得回退或覆盖项目资产。使用 `paperclip_session.py attest-commit` 在旧 session 根目录生成 `committed-path-ownership.json`。
+
+每条证明必须绑定 source session 及其有效契约摘要、完整 commit OID 与 tree、具体路径、该路径在 commit 和当前 HEAD 的内容指纹、commit 后路径历史摘要、owner session、owner 的稳定 scope 摘要和证明生成时间。owner contract 必须拥有路径且不得将其列入自身 forbidden。旧无 session 证据的路径必须先创建仅声明精确路径且带真实验证命令的新 session，再以该 session 作为 owner；不得使用自由文本 owner、宽泛目录或手工摘要绕过 owner contract。
+
+证明只迁移已提交归属：同路径存在未提交改动时拒绝创建；证明后再次提交该路径、路径指纹变化、owner scope 变化、session overlap 失效或 manifest 摘要不匹配时，证明立即失效并由 close 继续报告原 `scope.outside` / `scope.forbidden`。目标 source session 自身的 forbidden 路径可以由真实 peer owner 证明排除，但 owner 自身 forbidden 永不放行。所有写入必须在 workspace lifecycle lock 内原子完成。
+
 ## 4. 过程产物规范
 
 ### 4.1 TODO

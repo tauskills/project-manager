@@ -15,6 +15,7 @@ try:
         git_command,
         git_status_entries,
         is_git_ignored,
+        owned_commit_revisions,
         path_matches_contract,
         validate_contract_paths,
         validate_session_key_list,
@@ -30,6 +31,7 @@ except ImportError:  # Support direct execution from the skill directory.
         git_command,
         git_status_entries,
         is_git_ignored,
+        owned_commit_revisions,
         path_matches_contract,
         validate_contract_paths,
         validate_session_key_list,
@@ -65,7 +67,7 @@ IGNORED_WALK_DIRS = {
     "__pycache__", "build", "coverage", "dist", "node_modules", "target", "vendor", "venv",
 }
 REQUIRED_SESSION_FILES = {"context.json", "todo.md", "handoff.md", "evidence.md"}
-OPTIONAL_SESSION_FILES = {"delivery.json"}
+OPTIONAL_SESSION_FILES = {"delivery.json", "committed-path-ownership.json"}
 ALLOWED_SESSION_DIRS = {"notes", "screens", "logs", "scratch"}
 ALLOWED_PROCESS_ROOT_DIRECTORIES = {"sessions", "checkouts"}
 FORBIDDEN_CONTEXT_KEYS = {
@@ -505,6 +507,7 @@ def check_project_assets(
 def check_git_provenance(
     workspace: Path,
     context: dict | None,
+    selected_session: str | None,
     references: dict[str, str],
     task_title: str | None,
     findings: list[dict[str, str]],
@@ -523,10 +526,15 @@ def check_git_provenance(
     baseline_head = context.get("baseline_head") if context else None
     if not isinstance(baseline_head, str):
         return
-    log_result = git_command(workspace, "log", "-z", "--format=%B", f"{baseline_head}..HEAD")
-    if log_result is None or log_result.returncode != 0:
-        return
-    for message in decode_names(log_result.stdout):
+    revisions = owned_commit_revisions(workspace, context, selected_session) if selected_session else []
+    if not selected_session:
+        revision_result = git_command(workspace, "rev-list", "--reverse", f"{baseline_head}..HEAD")
+        revisions = revision_result.stdout.decode("ascii", errors="strict").splitlines() if revision_result and revision_result.returncode == 0 else []
+    for revision in revisions:
+        log_result = git_command(workspace, "show", "-s", "--format=%B", revision)
+        if log_result is None or log_result.returncode != 0:
+            continue
+        message = log_result.stdout.decode("utf-8", errors="replace")
         for ref, kind in references.items():
             if ref in message:
                 findings.append(finding("block", f"git.{kind}.commit", "git-log", f"A session commit message contains the current {kind}.", "Rewrite the commit message with project-owned terminology."))
@@ -584,7 +592,7 @@ def analyze(
             findings,
             passes,
         )
-        check_git_provenance(workspace, selected_context, references, task_title, findings, passes)
+        check_git_provenance(workspace, selected_context, selected_session, references, task_title, findings, passes)
     decision = "block" if any(item["severity"] == "block" for item in findings) else "revise" if findings else "allow"
     return {
         "decision": decision,

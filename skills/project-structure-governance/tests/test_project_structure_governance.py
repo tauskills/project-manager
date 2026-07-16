@@ -334,6 +334,70 @@ class ProjectStructureGovernanceTests(unittest.TestCase):
             self.assertEqual("allow", report["decision"])
             self.assertIn("文档包编号有效：docs/product/payment", report["passes"])
 
+    def test_checker_allows_project_governance_chapters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            bootstrap(workspace, "generic")
+            governance = workspace / "docs/project/project-governance"
+            governance.mkdir()
+            chapters = [
+                "001-overview.md",
+                "002-project-conventions.md",
+                "003-roadmap.md",
+                "004-feature-artifact-index.md",
+                "005-docs-output-inventory.md",
+                "006-design-coverage-audit.md",
+                "007-document-language-governance.md",
+                "008-file-organization-policy.md",
+                "009-application-directory-naming-decision.md",
+                "010-governance-change-log.md",
+            ]
+            for chapter in chapters:
+                (governance / chapter).write_text("# 项目治理\n", encoding="utf-8")
+
+            report = analyze(workspace)
+
+            noncanonical = [
+                item["path"]
+                for item in report["findings"]
+                if item["code"] == "document.noncanonical"
+            ]
+            self.assertEqual([], noncanonical)
+
+    def test_checker_allows_redacted_test_report_evidence_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            bootstrap(workspace, "generic")
+            report_bundle = workspace / "docs/testing/payment/test-report"
+            evidence_bundle = report_bundle / "evidence/2026-07-16-checkout-regression"
+            (evidence_bundle / "screenshots").mkdir(parents=True)
+            (evidence_bundle / "logs").mkdir()
+            (evidence_bundle / "attachments").mkdir()
+            (workspace / "docs/testing/payment/001-overview.md").write_text("# 支付测试总览\n", encoding="utf-8")
+            report_bundle.mkdir(parents=True, exist_ok=True)
+            (report_bundle / "001-overview.md").write_text("# 支付测试报告\n", encoding="utf-8")
+            (evidence_bundle / "001-overview.md").write_text("# 证据索引\n\n已完成脱敏检查。\n", encoding="utf-8")
+            (evidence_bundle / "screenshots/001-verification-checkout-desktop.png").write_bytes(b"image")
+            (evidence_bundle / "logs/002-browser-network-summary.txt").write_text("GET /checkout 200\n", encoding="utf-8")
+            (evidence_bundle / "attachments/003-test-results.json").write_text("{}\n", encoding="utf-8")
+
+            report = analyze(workspace)
+
+            self.assertNotIn("document.noncanonical", {item["code"] for item in report["findings"]})
+
+    def test_checker_rejects_unindexed_or_raw_test_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            bootstrap(workspace, "generic")
+            raw_evidence = workspace / "docs/testing/payment/test-report/evidence/checkout-regression"
+            raw_evidence.mkdir(parents=True)
+            (raw_evidence / "session.har").write_text("{}\n", encoding="utf-8")
+
+            report = analyze(workspace)
+
+            findings = [item for item in report["findings"] if item["code"] == "document.noncanonical"]
+            self.assertEqual(["docs/testing/payment/test-report/evidence/checkout-regression/session.har"], [item["path"] for item in findings])
+
     def test_checker_blocks_missing_overview_and_invalid_chapter_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

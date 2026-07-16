@@ -961,18 +961,85 @@ def write_context(path: Path, context: dict) -> None:
             temporary.unlink()
 
 
+def legacy_session_interval(session_key: str, context: dict) -> tuple[datetime, datetime | None] | None:
+    if (
+        context.get("schema_version") != 2
+        or context.get("session_key") != session_key
+        or not contract_digest_is_valid(context)
+    ):
+        return None
+    started_at = context.get("started_at")
+    if not isinstance(started_at, str):
+        return None
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        return None
+    started = started.astimezone(timezone.utc)
+    if not session_key.startswith(f"{started.strftime('%Y%m%dT%H%M%SZ')}-"):
+        return None
+
+    status = context.get("status")
+    if status == "active":
+        return (started, None) if "closed_at" not in context else None
+    if status != "closed":
+        return None
+    closed_at = context.get("closed_at")
+    if not isinstance(closed_at, str):
+        return None
+    try:
+        closed = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if closed.tzinfo is None:
+        return None
+    closed = closed.astimezone(timezone.utc)
+    return (started, closed) if closed >= started else None
+
+
+def session_intervals_overlap(
+    selected: tuple[datetime, datetime | None],
+    peer: tuple[datetime, datetime | None],
+) -> bool:
+    selected_started, selected_closed = selected
+    peer_started, peer_closed = peer
+    return (
+        (selected_closed is None or peer_started < selected_closed)
+        and (peer_closed is None or selected_started < peer_closed)
+    )
+
+
 def legacy_overlap_peer_keys(workspace: Path, selected_session_key: str) -> list[str]:
     sessions_root = workspace / PROCESS_RELATIVE / "sessions"
     if not sessions_root.is_dir() or sessions_root.is_symlink():
         return []
-    return sorted(
-        session.name
-        for session in sessions_root.iterdir()
-        if session.name != selected_session_key
-        and session.is_dir()
-        and not session.is_symlink()
-        and SESSION_KEY_RE.fullmatch(session.name)
-    )
+    try:
+        selected_context = load_context(session_path(workspace, selected_session_key))
+    except ValueError:
+        return []
+    selected_interval = legacy_session_interval(selected_session_key, selected_context)
+    if selected_interval is None:
+        return []
+
+    peers = []
+    for session in sessions_root.iterdir():
+        if (
+            session.name == selected_session_key
+            or not session.is_dir()
+            or session.is_symlink()
+            or not SESSION_KEY_RE.fullmatch(session.name)
+        ):
+            continue
+        try:
+            peer_context = load_context(session)
+        except ValueError:
+            continue
+        peer_interval = legacy_session_interval(session.name, peer_context)
+        if peer_interval is not None and session_intervals_overlap(selected_interval, peer_interval):
+            peers.append(session.name)
+    return sorted(peers)
 
 
 def _migrate_legacy_context_unlocked(
