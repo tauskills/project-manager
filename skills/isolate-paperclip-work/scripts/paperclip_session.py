@@ -961,7 +961,8 @@ def write_context(path: Path, context: dict) -> None:
             temporary.unlink()
 
 
-def legacy_session_interval(session_key: str, context: dict) -> tuple[datetime, datetime | None] | None:
+def legacy_session_interval(session: Path, context: dict) -> tuple[datetime, datetime | None] | None:
+    session_key = session.name
     if (
         context.get("schema_version") != 2
         or context.get("session_key") != session_key
@@ -996,7 +997,22 @@ def legacy_session_interval(session_key: str, context: dict) -> tuple[datetime, 
     if closed.tzinfo is None:
         return None
     closed = closed.astimezone(timezone.utc)
-    return (started, closed) if closed >= started else None
+    if closed < started:
+        return None
+    try:
+        delivery = json.loads((session / "delivery.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(delivery, dict)
+        or not delivery_digest_is_valid(delivery)
+        or delivery.get("session_key") != session_key
+        or delivery.get("status") != "closed"
+        or delivery.get("closed_at") != closed_at
+        or delivery.get("hygiene_decision") != "allow"
+    ):
+        return None
+    return started, closed
 
 
 def session_intervals_overlap(
@@ -1019,7 +1035,7 @@ def legacy_overlap_peer_keys(workspace: Path, selected_session_key: str) -> list
         selected_context = load_context(session_path(workspace, selected_session_key))
     except ValueError:
         return []
-    selected_interval = legacy_session_interval(selected_session_key, selected_context)
+    selected_interval = legacy_session_interval(session_path(workspace, selected_session_key), selected_context)
     if selected_interval is None:
         return []
 
@@ -1036,7 +1052,7 @@ def legacy_overlap_peer_keys(workspace: Path, selected_session_key: str) -> list
             peer_context = load_context(session)
         except ValueError:
             continue
-        peer_interval = legacy_session_interval(session.name, peer_context)
+        peer_interval = legacy_session_interval(session, peer_context)
         if peer_interval is not None and session_intervals_overlap(selected_interval, peer_interval):
             peers.append(session.name)
     return sorted(peers)

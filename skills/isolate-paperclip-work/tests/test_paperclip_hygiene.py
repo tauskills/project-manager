@@ -200,6 +200,19 @@ class PaperclipSessionTests(unittest.TestCase):
             invalid_context = json.loads(invalid_context_path.read_text(encoding="utf-8"))
             invalid_context["agent_ref"] = "tampered"
             invalid_context_path.write_text(json.dumps(invalid_context), encoding="utf-8")
+            incomplete = create_session(
+                workspace,
+                "incomplete-owner",
+                ["docs/incomplete.md"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=7),
+            )
+            incomplete_context_path = incomplete / "context.json"
+            incomplete_context = json.loads(incomplete_context_path.read_text(encoding="utf-8"))
+            incomplete_context["status"] = "closed"
+            incomplete_context["closed_at"] = (FIXED_TIME + timedelta(seconds=20)).isoformat()
+            incomplete_context["contract_digest"] = contract_digest(incomplete_context)
+            incomplete_context_path.write_text(json.dumps(incomplete_context), encoding="utf-8")
             selected = create_session(
                 workspace,
                 "selected-owner",
@@ -248,6 +261,16 @@ class PaperclipSessionTests(unittest.TestCase):
             closing_context["closed_at"] = (FIXED_TIME + timedelta(seconds=10)).isoformat()
             closing_context["contract_digest"] = contract_digest(closing_context)
             closing_context_path.write_text(json.dumps(closing_context), encoding="utf-8")
+            paperclip_session.write_delivery(
+                closing / "delivery.json",
+                {
+                    "schema_version": 1,
+                    "session_key": closing.name,
+                    "status": "closed",
+                    "closed_at": closing_context["closed_at"],
+                    "hygiene_decision": "allow",
+                },
+            )
             selected_context_path = selected / "context.json"
             selected_context = json.loads(selected_context_path.read_text(encoding="utf-8"))
             selected_context.pop("overlapping_session_keys")
