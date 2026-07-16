@@ -1223,6 +1223,159 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             self.assertTrue(result["closed"])
             self.assertEqual(["docs/payment-policy.md"], result["delivery"]["changed_paths"])
 
+    def test_large_attested_path_set_batches_ownership_and_git_scans(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "payment-policy", ["docs/payment-policy.md"], PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"], started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace, "generated-reports", ["src/generated/**"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment\n", encoding="utf-8")
+            generated = workspace / "src/generated"
+            generated.mkdir(parents=True)
+            paths = []
+            for index in range(120):
+                relative = f"src/generated/report_{index:03d}.txt"
+                (workspace / relative).write_text(f"report {index}\n", encoding="utf-8")
+                paths.append(relative)
+            git(workspace, "add", "docs/payment-policy.md", "src/generated")
+            git(
+                workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "add payment policy and generated reports",
+            )
+            revision = git(workspace, "rev-parse", "HEAD").stdout.strip()
+            attest_committed_paths(workspace, selected.name, revision, paths, owner_session_key=peer.name)
+
+            with (
+                mock.patch.object(
+                    paperclip_session, "load_committed_ownership",
+                    wraps=paperclip_session.load_committed_ownership,
+                ) as load_manifest,
+                mock.patch.object(
+                    paperclip_session, "resolve_commit", wraps=paperclip_session.resolve_commit,
+                ) as resolve,
+                mock.patch.object(
+                    paperclip_session, "commit_changed_paths",
+                    wraps=paperclip_session.commit_changed_paths,
+                ) as changed_paths,
+                mock.patch.object(
+                    paperclip_session, "fingerprint_git_paths",
+                    wraps=paperclip_session.fingerprint_git_paths,
+                ) as fingerprint_paths,
+            ):
+                changed = paperclip_session.effective_changed_paths(workspace, json.loads(
+                    (selected / "context.json").read_text(encoding="utf-8")
+                ), selected.name)
+
+            self.assertEqual(["docs/payment-policy.md"], changed)
+            self.assertEqual(1, load_manifest.call_count)
+            self.assertEqual(1, resolve.call_count)
+            self.assertEqual(1, changed_paths.call_count)
+            self.assertLessEqual(fingerprint_paths.call_count, 2)
+
+            (selected / "todo.md").write_text("# Process TODO\n\n- [x] Done.\n", encoding="utf-8")
+            result = close_session(workspace, selected.name)
+            self.assertTrue(result["closed"])
+            self.assertEqual(["docs/payment-policy.md"], result["delivery"]["changed_paths"])
+
+    def test_large_committed_path_set_batches_active_peer_baseline_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "payment-policy", ["docs/payment-policy.md"], PASS_COMMAND,
+                expected_outputs=["docs/payment-policy.md"], started_at=FIXED_TIME,
+            )
+            create_session(
+                workspace, "generated-reports", ["src/generated/**"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            (workspace / "docs").mkdir()
+            (workspace / "docs/payment-policy.md").write_text("# Payment\n", encoding="utf-8")
+            generated = workspace / "src/generated"
+            generated.mkdir(parents=True)
+            for index in range(120):
+                (generated / f"report_{index:03d}.txt").write_text(f"report {index}\n", encoding="utf-8")
+            git(workspace, "add", "docs/payment-policy.md", "src/generated")
+            git(
+                workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "add payment policy and generated reports",
+            )
+
+            with (
+                mock.patch.object(
+                    paperclip_session, "fingerprint_git_path",
+                    wraps=paperclip_session.fingerprint_git_path,
+                ) as fingerprint_path,
+                mock.patch.object(
+                    paperclip_session, "fingerprint_git_paths",
+                    wraps=paperclip_session.fingerprint_git_paths,
+                ) as fingerprint_paths,
+            ):
+                changed = paperclip_session.effective_changed_paths(workspace, json.loads(
+                    (selected / "context.json").read_text(encoding="utf-8")
+                ), selected.name)
+
+            self.assertEqual(["docs/payment-policy.md"], changed)
+            self.assertEqual(0, fingerprint_path.call_count)
+            self.assertEqual(1, fingerprint_paths.call_count)
+
+    def test_batched_peer_scan_rejects_malformed_baseline_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            selected = create_session(
+                workspace, "payment-policy", ["docs/payment-policy.md"], PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            peer = create_session(
+                workspace, "generated-reports", ["src/generated/report.txt"], PASS_COMMAND,
+                started_at=FIXED_TIME + timedelta(seconds=1),
+            )
+            peer_context_path = peer / "context.json"
+            peer_context = json.loads(peer_context_path.read_text(encoding="utf-8"))
+            peer_context["baseline_changes"]["src/generated/report.txt"] = {"status": "??"}
+            peer_context["contract_digest"] = contract_digest(peer_context)
+            peer_context_path.write_text(json.dumps(peer_context), encoding="utf-8")
+            (workspace / "src/generated").mkdir(parents=True)
+            (workspace / "src/generated/report.txt").write_text("report\n", encoding="utf-8")
+
+            changed = paperclip_session.effective_changed_paths(workspace, json.loads(
+                (selected / "context.json").read_text(encoding="utf-8")
+            ), selected.name)
+
+            self.assertIn("src/generated/report.txt", changed)
+
+    def test_batched_git_fingerprints_match_single_path_semantics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            (workspace / "src/assets").mkdir(parents=True)
+            (workspace / "src/assets/report.txt").write_text("report\n", encoding="utf-8")
+            (workspace / "src/report-link").symlink_to("assets/report.txt")
+            git(workspace, "add", "src")
+            git(
+                workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                "commit", "-q", "-m", "add report assets",
+            )
+            paths = {
+                "src/assets/report.txt", "src/report-link", "src/assets", "src/missing.txt",
+            }
+
+            batched = paperclip_session.fingerprint_git_paths(workspace, "HEAD", paths)
+            singles = {
+                relative: paperclip_session.fingerprint_git_path(workspace, "HEAD", relative)
+                for relative in paths
+            }
+
+            self.assertEqual(singles, batched)
+
     def test_attested_peer_can_own_path_forbidden_only_by_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

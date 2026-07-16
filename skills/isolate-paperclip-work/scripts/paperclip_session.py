@@ -293,6 +293,89 @@ def fingerprint_git_path(workspace: Path, revision: str, relative: str) -> str:
     return f"sha256:{hashlib.sha256(content.stdout).hexdigest()}"
 
 
+def fingerprint_git_paths(workspace: Path, revision: str, relatives: set[str]) -> dict[str, str]:
+    """Fingerprint concrete paths with one blob read batch per revision."""
+    fingerprints = {relative: "missing" for relative in relatives}
+    entries: dict[str, tuple[str, str, str]] = {}
+    ordered = sorted(relatives)
+    for offset in range(0, len(ordered), 256):
+        tree = git_command(workspace, "ls-tree", "-z", revision, "--", *ordered[offset:offset + 256])
+        if tree is None or tree.returncode != 0:
+            raise ValueError("unable to inspect committed path set at session baseline")
+        for raw_entry in tree.stdout.split(b"\0"):
+            if not raw_entry:
+                continue
+            metadata, separator, raw_path = raw_entry.partition(b"\t")
+            fields = metadata.split()
+            relative = raw_path.decode("utf-8", errors="surrogateescape")
+            if not separator or len(fields) != 3 or relative not in relatives:
+                raise ValueError("unable to inspect committed path set at session baseline")
+            entries[relative] = tuple(field.decode("ascii", errors="strict") for field in fields)
+
+    blob_ids = list(dict.fromkeys(
+        object_id for mode, object_type, object_id in entries.values() if object_type == "blob"
+    ))
+    contents: dict[str, bytes] = {}
+    if blob_ids:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(workspace), "cat-file", "--batch"],
+                input=("\n".join(blob_ids) + "\n").encode("ascii"),
+                check=False,
+                capture_output=True,
+            )
+        except OSError as exc:
+            raise ValueError("unable to read committed path set") from exc
+        if result.returncode != 0:
+            raise ValueError("unable to read committed path set")
+        cursor = 0
+        for object_id in blob_ids:
+            header_end = result.stdout.find(b"\n", cursor)
+            if header_end < 0:
+                raise ValueError("unable to read committed path set")
+            header = result.stdout[cursor:header_end].split()
+            if len(header) != 3 or header[0].decode("ascii") != object_id or header[1] != b"blob":
+                raise ValueError("unable to read committed path set")
+            size = int(header[2])
+            content_start = header_end + 1
+            content_end = content_start + size
+            if result.stdout[content_end:content_end + 1] != b"\n":
+                raise ValueError("unable to read committed path set")
+            contents[object_id] = result.stdout[content_start:content_end]
+            cursor = content_end + 1
+
+    for relative, (mode, object_type, object_id) in entries.items():
+        if object_type != "blob":
+            fingerprints[relative] = "non-file"
+            continue
+        content = contents[object_id]
+        fingerprints[relative] = (
+            f"symlink:{content.decode('utf-8', errors='surrogateescape')}"
+            if mode == "120000"
+            else f"sha256:{hashlib.sha256(content).hexdigest()}"
+        )
+    # A directory pathspec can be collapsed when one of its descendants is
+    # requested in the same ls-tree call. Resolve directories in a second
+    # batch; paths still absent are genuinely missing at this revision.
+    unresolved = sorted(relatives - entries.keys())
+    for offset in range(0, len(unresolved), 256):
+        trees = git_command(
+            workspace, "ls-tree", "-d", "-z", revision, "--", *unresolved[offset:offset + 256],
+        )
+        if trees is None or trees.returncode != 0:
+            raise ValueError("unable to inspect committed path set at session baseline")
+        for raw_entry in trees.stdout.split(b"\0"):
+            if not raw_entry:
+                continue
+            metadata, separator, raw_path = raw_entry.partition(b"\t")
+            fields = metadata.split()
+            relative = raw_path.decode("utf-8", errors="surrogateescape")
+            if not separator or len(fields) != 3 or relative not in relatives:
+                raise ValueError("unable to inspect committed path set at session baseline")
+            fingerprints[relative] = "non-file"
+    return fingerprints
+
+
 def capture_dirty_baseline(workspace: Path) -> dict[str, dict[str, str]]:
     process = PROCESS_RELATIVE.as_posix()
     return {
@@ -397,49 +480,123 @@ def committed_ownership_claims_path(
     context: dict,
     relative: str,
 ) -> bool:
+    return relative in committed_ownership_claimed_paths(
+        workspace, session_key, context, {relative},
+    )
+
+
+def committed_ownership_claimed_paths(
+    workspace: Path,
+    session_key: str,
+    context: dict,
+    relatives: set[str],
+) -> set[str]:
     manifest = load_committed_ownership(workspace, session_key, context)
     if manifest is None:
-        return False
+        return set()
+    candidates = set(relatives)
+    claimed: set[str] = set()
+    revision_cache: dict[str, set[str] | None] = {}
+    owner_cache: dict[tuple[str, str], tuple[list[str], list[str]] | None] = {}
+    fingerprint_cache: dict[str, dict[str, str]] = {}
+    post_commit_changes: dict[str, set[str] | None] = {}
+    empty_history_digest = hashlib.sha256(b"").hexdigest()
+
+    def revision_changed_paths(revision: str) -> set[str] | None:
+        if revision not in revision_cache:
+            try:
+                revision_cache[revision] = (
+                    commit_changed_paths(workspace, revision)
+                    if resolve_commit(workspace, revision) == revision
+                    and commit_is_ancestor(workspace, revision, "HEAD")
+                    else None
+                )
+            except ValueError:
+                revision_cache[revision] = None
+        return revision_cache[revision]
+
+    def git_fingerprints(revision: str, paths: set[str]) -> dict[str, str]:
+        cached = fingerprint_cache.setdefault(revision, {})
+        missing = paths - cached.keys()
+        if missing:
+            cached.update(fingerprint_git_paths(workspace, revision, missing))
+        return cached
+
+    def valid_owner(record: dict) -> tuple[list[str], list[str]] | None:
+        owner = record.get("owner")
+        if not isinstance(owner, dict) or owner.get("kind") != "session":
+            return None
+        owner_key = owner.get("session_key")
+        scope_digest = owner.get("scope_digest")
+        if not isinstance(owner_key, str) or not isinstance(scope_digest, str):
+            return None
+        cache_key = (owner_key, scope_digest)
+        if cache_key not in owner_cache:
+            owner_cache[cache_key] = None
+            try:
+                owner_context = load_context(session_path(workspace, owner_key))
+                owner_allowed = validate_contract_paths(owner_context.get("allowed_paths", []), "allowed path")
+                owner_forbidden = validate_contract_paths(owner_context.get("forbidden_paths", []), "forbidden path")
+            except (OSError, ValueError, TypeError, AttributeError):
+                return None
+            if (
+                contract_digest_is_valid(owner_context)
+                and scope_digest == ownership_scope_digest(owner_context)
+                and sessions_overlap(session_key, context, owner_key, owner_context)
+            ):
+                owner_cache[cache_key] = (owner_allowed, owner_forbidden)
+        return owner_cache[cache_key]
+
     for record in manifest["records"]:
         if not isinstance(record, dict) or not isinstance(record.get("paths"), dict):
             continue
-        evidence = record["paths"].get(relative)
         revision = record.get("commit")
-        if not isinstance(evidence, dict) or not isinstance(revision, str):
+        if not isinstance(revision, str):
+            continue
+        changed = revision_changed_paths(revision)
+        owner_scope = valid_owner(record)
+        if changed is None or owner_scope is None:
+            continue
+        allowed, forbidden = owner_scope
+        relevant = candidates.intersection(record["paths"], changed) - claimed
+        relevant = {
+            relative for relative in relevant
+            if path_matches_contract(relative, allowed) and not path_matches_contract(relative, forbidden)
+        }
+        if not relevant:
             continue
         try:
-            if (
-                resolve_commit(workspace, revision) != revision
-                or not commit_is_ancestor(workspace, revision, "HEAD")
-                or relative not in commit_changed_paths(workspace, revision)
-                or fingerprint_git_path(workspace, revision, relative) != evidence.get("commit_fingerprint")
-                or fingerprint_git_path(workspace, "HEAD", relative) != evidence.get("head_fingerprint")
-                or path_history_digest(workspace, revision, relative) != evidence.get("post_commit_history_digest")
-            ):
-                continue
+            commit_fingerprints = git_fingerprints(revision, relevant)
+            head_fingerprints = git_fingerprints("HEAD", relevant)
         except ValueError:
             continue
-        owner = record.get("owner")
-        if not isinstance(owner, dict):
-            continue
-        if owner.get("kind") != "session" or not isinstance(owner.get("session_key"), str):
-            continue
-        owner_key = owner["session_key"]
-        try:
-            owner_context = load_context(session_path(workspace, owner_key))
-            owner_allowed = validate_contract_paths(owner_context.get("allowed_paths", []), "allowed path")
-            owner_forbidden = validate_contract_paths(owner_context.get("forbidden_paths", []), "forbidden path")
-        except (OSError, ValueError, TypeError, AttributeError):
-            continue
-        if (
-            contract_digest_is_valid(owner_context)
-            and owner.get("scope_digest") == ownership_scope_digest(owner_context)
-            and sessions_overlap(session_key, context, owner_key, owner_context)
-            and path_matches_contract(relative, owner_allowed)
-            and not path_matches_contract(relative, owner_forbidden)
-        ):
-            return True
-    return False
+        for relative in relevant:
+            evidence = record["paths"].get(relative)
+            if not isinstance(evidence, dict):
+                continue
+            history_digest = evidence.get("post_commit_history_digest")
+            if history_digest == empty_history_digest:
+                if revision not in post_commit_changes:
+                    try:
+                        post_commit_changes[revision] = committed_paths_since(workspace, revision)
+                    except ValueError:
+                        post_commit_changes[revision] = None
+                history_valid = (
+                    post_commit_changes[revision] is not None
+                    and relative not in post_commit_changes[revision]
+                )
+            else:
+                try:
+                    history_valid = path_history_digest(workspace, revision, relative) == history_digest
+                except ValueError:
+                    history_valid = False
+            if (
+                history_valid
+                and commit_fingerprints[relative] == evidence.get("commit_fingerprint")
+                and head_fingerprints[relative] == evidence.get("head_fingerprint")
+            ):
+                claimed.add(relative)
+    return claimed
 
 
 def _attest_committed_paths_unlocked(
@@ -587,16 +744,40 @@ def peer_session_claims_path(
     selected_context: dict,
     relative: str,
 ) -> bool:
+    return relative in peer_sessions_claimed_paths(
+        workspace, selected_session_key, selected_context, {relative},
+    )
+
+
+def peer_sessions_claimed_paths(
+    workspace: Path,
+    selected_session_key: str,
+    selected_context: dict,
+    relatives: set[str],
+) -> set[str]:
     try:
         selected_allowed = validate_contract_paths(selected_context.get("allowed_paths", []), "allowed path")
         selected_forbidden = validate_contract_paths(selected_context.get("forbidden_paths", []), "forbidden path")
     except (AttributeError, TypeError, ValueError):
-        return False
-    if path_matches_contract(relative, selected_allowed) or path_matches_contract(relative, selected_forbidden):
-        return False
+        return set()
+    candidates = {
+        relative for relative in relatives
+        if not path_matches_contract(relative, selected_allowed)
+        and not path_matches_contract(relative, selected_forbidden)
+    }
+    if not candidates:
+        return set()
     sessions_root = workspace / PROCESS_RELATIVE / "sessions"
     if not sessions_root.is_dir() or sessions_root.is_symlink():
-        return False
+        return set()
+    claimed: set[str] = set()
+    workspace_fingerprints: dict[str, str] = {}
+
+    def current_fingerprint(relative: str) -> str:
+        if relative not in workspace_fingerprints:
+            workspace_fingerprints[relative] = fingerprint_workspace_path(workspace, relative)
+        return workspace_fingerprints[relative]
+
     for session in sessions_root.iterdir():
         if session.name == selected_session_key or not session.is_dir() or session.is_symlink():
             continue
@@ -617,40 +798,76 @@ def peer_session_claims_path(
             forbidden = validate_contract_paths(context.get("forbidden_paths", []), "forbidden path")
         except (AttributeError, TypeError, ValueError):
             continue
-        if not path_matches_contract(relative, allowed) or path_matches_contract(relative, forbidden):
+        relevant = {
+            relative for relative in candidates - claimed
+            if path_matches_contract(relative, allowed) and not path_matches_contract(relative, forbidden)
+        }
+        if not relevant:
             continue
         if context.get("status") == "active":
-            if path_changed_since_session_baseline(workspace, context, relative):
-                return True
             try:
                 expected_outputs = validate_contract_paths(
                     context.get("expected_outputs", []), "expected output", allow_globs=False
                 )
             except (AttributeError, TypeError, ValueError):
-                continue
+                expected_outputs = []
             baseline = context.get("baseline_changes", {})
-            record = baseline.get(relative) if isinstance(baseline, dict) else None
-            if (
-                relative in expected_outputs
-                and isinstance(record, dict)
-                and record.get("fingerprint") == fingerprint_workspace_path(workspace, relative)
-            ):
-                return True
+            if not isinstance(baseline, dict) or not isinstance(context.get("baseline_head"), str):
+                continue
+            malformed_baseline = {
+                relative for relative in relevant
+                if relative in baseline
+                and (
+                    not isinstance(baseline[relative], dict)
+                    or not isinstance(baseline[relative].get("fingerprint"), str)
+                )
+            }
+            relevant -= malformed_baseline
+            if not relevant:
+                continue
+            baseline_fingerprints = {
+                relative: baseline[relative].get("fingerprint")
+                for relative in relevant
+                if isinstance(baseline.get(relative), dict)
+                and isinstance(baseline[relative].get("fingerprint"), str)
+            }
+            missing = relevant - baseline.keys()
+            try:
+                baseline_fingerprints.update(
+                    fingerprint_git_paths(workspace, context["baseline_head"], missing)
+                )
+            except ValueError:
+                continue
+            for relative in relevant:
+                current = current_fingerprint(relative)
+                if baseline_fingerprints[relative] != current:
+                    claimed.add(relative)
+                    continue
+                record = baseline.get(relative)
+                if (
+                    relative in expected_outputs
+                    and isinstance(record, dict)
+                    and record.get("fingerprint") == current
+                ):
+                    claimed.add(relative)
             continue
         try:
             delivery = json.loads((session / "delivery.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         fingerprints = delivery.get("owned_path_fingerprints", {}) if isinstance(delivery, dict) else {}
-        if (
+        if not (
             delivery_digest_is_valid(delivery)
             and delivery.get("status") == "closed"
             and delivery.get("hygiene_decision") == "allow"
             and isinstance(fingerprints, dict)
-            and fingerprints.get(relative) == fingerprint_workspace_path(workspace, relative)
         ):
-            return True
-    return False
+            continue
+        claimed.update(
+            relative for relative in relevant
+            if fingerprints.get(relative) == current_fingerprint(relative)
+        )
+    return claimed
 
 
 def effective_changed_paths(
@@ -665,10 +882,9 @@ def effective_changed_paths(
     current_status = git_status_entries(workspace)
     committed = committed_paths_since(workspace, baseline_head)
     if selected_session_key:
-        committed = {
-            relative for relative in committed
-            if not committed_ownership_claims_path(workspace, selected_session_key, context, relative)
-        }
+        committed -= committed_ownership_claimed_paths(
+            workspace, selected_session_key, context, committed,
+        )
     effective = set(committed)
     for relative in set(current_status) | set(baseline):
         current = {
@@ -689,6 +905,9 @@ def effective_changed_paths(
         return changed
     allowed = validate_contract_paths(context.get("allowed_paths", []), "allowed path")
     forbidden = validate_contract_paths(context.get("forbidden_paths", []), "forbidden path")
+    peer_claimed = peer_sessions_claimed_paths(
+        workspace, selected_session_key, context, set(changed),
+    )
     return [
         relative for relative in changed
         if (
@@ -701,7 +920,7 @@ def effective_changed_paths(
             and baseline[relative].get("fingerprint")
             == fingerprint_workspace_path(workspace, relative)
         )
-        and not peer_session_claims_path(workspace, selected_session_key, context, relative)
+        and relative not in peer_claimed
     ]
 
 
