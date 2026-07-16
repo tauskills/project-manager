@@ -855,6 +855,26 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             self.assertEqual("revise", report["decision"])
             self.assertIn("scan.too_large", {item["code"] for item in report["findings"]})
 
+    def test_large_otf_without_sfnt_signature_still_requires_manual_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = create_session(
+                workspace,
+                "unsigned-font-asset",
+                ["assets/fonts/**"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            font = workspace / "assets/fonts/unsigned.otf"
+            font.parent.mkdir(parents=True)
+            font.write_bytes(b"NOTF" + b"A" * 2_000_001)
+
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+
+            self.assertEqual("revise", report["decision"])
+            self.assertIn("scan.too_large", {item["code"] for item in report["findings"]})
+
     def test_large_opentype_font_keeps_path_reference_checks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
