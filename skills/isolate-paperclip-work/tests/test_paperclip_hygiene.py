@@ -1032,6 +1032,89 @@ class PaperclipHygieneCheckerTests(unittest.TestCase):
             self.assertEqual("block", report["decision"])
             self.assertIn("scope.forbidden", {item["code"] for item in report["findings"]})
 
+    def test_large_opentype_font_is_classified_as_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = create_session(
+                workspace,
+                "web-font-assets",
+                ["assets/fonts/**"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            font = workspace / "assets/fonts/NotoSansCJKsc-Regular.otf"
+            font.parent.mkdir(parents=True)
+            font.write_bytes(b"OTTO" + b"A" * 2_000_001)
+
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+
+            self.assertEqual("allow", report["decision"])
+            self.assertNotIn("scan.too_large", {item["code"] for item in report["findings"]})
+
+    def test_large_plain_text_still_requires_manual_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = create_session(
+                workspace,
+                "large-text-report",
+                ["docs/reports/**"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            report_file = workspace / "docs/reports/runtime-summary.txt"
+            report_file.parent.mkdir(parents=True)
+            report_file.write_text("A" * 2_000_001, encoding="utf-8")
+
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+
+            self.assertEqual("revise", report["decision"])
+            self.assertIn("scan.too_large", {item["code"] for item in report["findings"]})
+
+    def test_large_otf_without_sfnt_signature_still_requires_manual_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = create_session(
+                workspace,
+                "unsigned-font-asset",
+                ["assets/fonts/**"],
+                PASS_COMMAND,
+                started_at=FIXED_TIME,
+            )
+            font = workspace / "assets/fonts/unsigned.otf"
+            font.parent.mkdir(parents=True)
+            font.write_bytes(b"NOTF" + b"A" * 2_000_001)
+
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+
+            self.assertEqual("revise", report["decision"])
+            self.assertIn("scan.too_large", {item["code"] for item in report["findings"]})
+
+    def test_large_opentype_font_keeps_path_reference_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            initialize_repository(workspace)
+            session = create_session(
+                workspace,
+                "web-font-assets",
+                ["assets/fonts/**"],
+                PASS_COMMAND,
+                task_ref="PC-1842",
+                started_at=FIXED_TIME,
+            )
+            font = workspace / "assets/fonts/PC-1842.otf"
+            font.parent.mkdir(parents=True)
+            font.write_bytes(b"OTTO" + b"A" * 2_000_001)
+
+            report = analyze(workspace, selected_session=session.name, scan_mode="changed")
+            codes = {item["code"] for item in report["findings"]}
+
+            self.assertEqual("block", report["decision"])
+            self.assertIn("leak.task_ref.path", codes)
+            self.assertNotIn("scan.too_large", codes)
+
     def test_scope_contract_tampering_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

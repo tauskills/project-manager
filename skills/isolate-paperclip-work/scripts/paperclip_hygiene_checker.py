@@ -87,6 +87,9 @@ CODE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".dart", ".go", ".java", ".js", ".jsx", ".kt", ".php",
     ".py", ".rb", ".rs", ".swift", ".ts", ".tsx", ".vue",
 }
+FONT_SIGNATURES_BY_SUFFIX = {
+    ".otf": (b"OTTO", b"\x00\x01\x00\x00"),
+}
 
 
 def finding(severity: str, code: str, path: str, message: str, repair: str) -> dict[str, str]:
@@ -164,6 +167,9 @@ def read_text(workspace: Path, relative: str, scan_mode: str, limit: int = 2_000
     raw = read_bytes(workspace, relative, scan_mode)
     if raw is None:
         return None, "unreadable"
+    font_signatures = FONT_SIGNATURES_BY_SUFFIX.get(Path(relative).suffix.lower())
+    if font_signatures and raw.startswith(font_signatures):
+        return None, "binary"
     if len(raw) > limit:
         return None, "large"
     if b"\0" in raw:
